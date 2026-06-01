@@ -1,6 +1,6 @@
 ---
-name: robodog brain skeleton
-overview: 为机器狗设计并搭建一个 Python 版「大脑」Agent 骨架（L3 认知层），采用分层 + 可插拔架构：LangGraph 编排决策循环、快慢双系统、世界模型、技能注册表、安全校验器、记忆系统，执行层先用 mock 实现，真机/厂商 SDK 留成可插拔接口，后续可平滑适配。
+name: robot brain skeleton
+overview: 为机器人设计并搭建一个 Python 版「大脑」Agent 骨架（L3 认知层），采用分层 + 可插拔架构：LangGraph 编排决策循环、快慢双系统、世界模型、技能注册表、安全校验器、记忆系统，执行层先用 mock 实现，真机/厂商 SDK 留成可插拔接口，后续可平滑适配。
 todos:
   - id: scaffold
     content: "初始化项目骨架: pyproject.toml、包目录、config/settings.py(选择 mock 实现的默认配置)"
@@ -35,7 +35,7 @@ todos:
 isProject: false
 ---
 
-# 机器狗大脑 Agent 骨架（Python 初稿）
+# 机器人大脑 Agent 骨架（Python 初稿）
 
 ## 定位与原则
 
@@ -95,12 +95,12 @@ flowchart TD
 ## 目录结构
 
 ```text
-robodog-brain/
+robot-brain/
   pyproject.toml                # 依赖与项目元信息
   config/settings.py            # 全局配置(选哪个LLM/robot实现, 阈值等)
-  robodog_brain/
+  robot_brain/
     core/
-      world_state.py            # 世界模型: 机器狗位姿/电量/手里有什么/环境物体/任务进度
+      world_state.py            # 世界模型: 机器人位姿/电量/手里有什么/环境物体/任务进度
       events.py                 # 事件与消息类型(指令/告警/打断)
       context.py                # 运行时上下文(注入各依赖)
     perception/
