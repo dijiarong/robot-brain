@@ -1,7 +1,7 @@
 [project]
-name = "robodog-brain"
+name = "robot-brain"
 version = "0.1.0"
-description = "Pluggable L3 cognition skeleton for a robot dog"
+description = "Pluggable L3 cognition skeleton for a robot"
 requires-python = ">=3.10"
 dependencies = [
     "pydantic>=2.0",
@@ -17,7 +17,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-include = ["robodog_brain*", "config*"]
+include = ["robot_brain*", "config*"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

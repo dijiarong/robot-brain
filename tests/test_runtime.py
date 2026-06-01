@@ -3,16 +3,16 @@ from __future__ import annotations
 import unittest
 
 from config.settings import Settings
-from robodog_brain.actuation.mock import MockRobot
-from robodog_brain.core.events import Event, EventType
-from robodog_brain.core.world_state import DetectedObject
-from robodog_brain.llm.base import ToolCall
-from robodog_brain.llm.mock import MockLLM
-from robodog_brain.memory.long_term import Experience, LongTermMemory
-from robodog_brain.perception.base import Observation
-from robodog_brain.perception.mock import MockPerception
-from robodog_brain.runtime.loop import AgentRuntime
-from robodog_brain.skills.base import Skill, SkillResult
+from robot_brain.actuation.mock import MockRobot
+from robot_brain.core.events import Event, EventType
+from robot_brain.core.world_state import DetectedObject
+from robot_brain.llm.base import ToolCall
+from robot_brain.llm.mock import MockLLM
+from robot_brain.memory.long_term import Experience, LongTermMemory
+from robot_brain.perception.base import Observation
+from robot_brain.perception.mock import MockPerception
+from robot_brain.runtime.loop import AgentRuntime
+from robot_brain.skills.base import Skill, SkillResult
 
 
 class AgentRuntimeTests(unittest.IsolatedAsyncioTestCase):

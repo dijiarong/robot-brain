@@ -8,11 +8,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from config.settings import Settings
-from robodog_brain.actuation.mock import MockRobot
-from robodog_brain.core.world_state import DetectedObject, Position
-from robodog_brain.perception.base import Observation
-from robodog_brain.perception.mock import MockPerception
-from robodog_brain.runtime.loop import AgentRuntime
+from robot_brain.actuation.mock import MockRobot
+from robot_brain.core.world_state import DetectedObject, Position
+from robot_brain.perception.base import Observation
+from robot_brain.perception.mock import MockPerception
+from robot_brain.runtime.loop import AgentRuntime
 
 
 async def main() -> None:
