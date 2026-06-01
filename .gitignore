@@ -1,8 +1,6 @@
 __pycache__/
 *.py[cod]
-.cursor/*
-!.cursor/plans/
-!.cursor/plans/*.plan.md
+.cursor/
 .pytest_cache/
 .deps/
 .venv/
