@@ -41,6 +41,7 @@ async def main() -> None:
     print("actions:")
     for action in robot.action_history:
         print(" -", action)
+    runtime.close()
 
 
 if __name__ == "__main__":

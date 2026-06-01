@@ -16,9 +16,12 @@ from robot_brain.skills.base import Skill, SkillResult
 
 
 class AgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self) -> None:
+        self.settings = Settings(memory_db_path=":memory:")
+
     async def test_patrol_uses_slow_planner(self) -> None:
         robot = MockRobot()
-        runtime = AgentRuntime.create(robot=robot)
+        runtime = AgentRuntime.create(settings=self.settings, robot=robot)
 
         result = await runtime.run_command("patrol the lobby")
 
@@ -29,7 +32,7 @@ class AgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
     async def test_low_battery_reflex_docks_before_planning(self) -> None:
         robot = MockRobot()
         perception = MockPerception(robot, [Observation(battery_level=20.0)])
-        runtime = AgentRuntime.create(robot=robot, perception=perception)
+        runtime = AgentRuntime.create(settings=self.settings, robot=robot, perception=perception)
 
         result = await runtime.run_command("patrol the lobby")
 
@@ -40,7 +43,7 @@ class AgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
     async def test_unsafe_navigation_is_blocked(self) -> None:
         robot = MockRobot()
         llm = MockLLM([[ToolCall(skill_name="navigate", parameters={"target": {"x": 100, "y": 0}})]])
-        runtime = AgentRuntime.create(robot=robot, llm=llm)
+        runtime = AgentRuntime.create(settings=self.settings, robot=robot, llm=llm)
 
         result = await runtime.run_command("go far away")
 
@@ -54,7 +57,7 @@ class AgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
             robot,
             [Observation(detected_objects=[DetectedObject(object_id="person-1", kind="person")])],
         )
-        runtime = AgentRuntime.create(robot=robot, perception=perception)
+        runtime = AgentRuntime.create(settings=self.settings, robot=robot, perception=perception)
 
         pending = await runtime.run_command("follow person-1", thread_id="follow-thread")
         resumed = await runtime.resume("follow-thread", approved=True)
@@ -65,7 +68,7 @@ class AgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_interrupt_activates_estop(self) -> None:
         robot = MockRobot()
-        runtime = AgentRuntime.create(robot=robot)
+        runtime = AgentRuntime.create(settings=self.settings, robot=robot)
 
         result = await runtime.handle_event(Event(type=EventType.INTERRUPT, message="operator stop"))
 
@@ -81,7 +84,7 @@ class AgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
                 [ToolCall(skill_name="report", parameters={"message": "inspection inconclusive", "severity": "warning"})],
             ]
         )
-        runtime = AgentRuntime.create(robot=robot, llm=llm)
+        runtime = AgentRuntime.create(settings=self.settings, robot=robot, llm=llm)
 
         result = await runtime.run_command("inspect the area")
 
@@ -101,7 +104,7 @@ class AgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
                 )
             ],
         )
-        runtime = AgentRuntime.create(robot=robot, perception=perception)
+        runtime = AgentRuntime.create(settings=self.settings, robot=robot, perception=perception)
 
         result = await runtime.run_command("inspect the anomaly")
 
@@ -132,7 +135,7 @@ class AgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
                 [ToolCall(skill_name=skill.name)],
             ]
         )
-        runtime = AgentRuntime.create(llm=llm)
+        runtime = AgentRuntime.create(settings=self.settings, llm=llm)
         runtime.context.skills.register(skill)
 
         result = await runtime.run_command("run iterative skill")
@@ -144,7 +147,7 @@ class AgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
     async def test_critical_alert_uses_fast_report(self) -> None:
         robot = MockRobot()
         perception = MockPerception(robot, [Observation(alerts=["critical: smoke detected"])])
-        runtime = AgentRuntime.create(robot=robot, perception=perception)
+        runtime = AgentRuntime.create(settings=self.settings, robot=robot, perception=perception)
 
         result = await runtime.run_command("patrol the lobby")
 
@@ -164,7 +167,7 @@ class AgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
                 return self.added[-limit:]
 
         store = RecordingStore()
-        runtime = AgentRuntime.create(long_term=LongTermMemory(store))
+        runtime = AgentRuntime.create(settings=self.settings, long_term=LongTermMemory(store))
 
         result = await runtime.run_command("stop")
 

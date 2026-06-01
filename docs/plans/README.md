@@ -5,6 +5,7 @@
 ## 已归档计划
 
 - [初始架构计划](./initial-architecture.md)：从 `.cursor/plans` 提取的机器狗大脑 Agent 骨架设计。
+- [第一次迭代：记忆持久化](./2026-06-02-memory-persistence.md)：使用 SQLite 补齐会话记录、长期经验和待确认任务的本地持久化。
 
 ## 新增计划
 

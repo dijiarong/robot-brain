@@ -14,13 +14,20 @@ from robot_brain.core.events import Event, EventType
 from robot_brain.core.world_state import WorldState
 from robot_brain.llm.base import LLMClient
 from robot_brain.llm.mock import MockLLM
+from robot_brain.memory.conversation import ConversationMemory
 from robot_brain.memory.long_term import Experience, LongTermMemory
 from robot_brain.memory.short_term import ShortTermMemory
+from robot_brain.memory.sqlite_store import SQLiteMemoryStore
 from robot_brain.orchestration.graph import BrainGraph, build_graph
 from robot_brain.orchestration.state import GraphState
 from robot_brain.perception.base import PerceptionAdapter
 from robot_brain.perception.mock import MockPerception
-from robot_brain.runtime.checkpoint import CheckpointStore, PendingCheckpoint
+from robot_brain.runtime.checkpoint import (
+    CheckpointRepository,
+    CheckpointStore,
+    PendingCheckpoint,
+    SQLiteCheckpointStore,
+)
 from robot_brain.safety.estop import EmergencyStop
 from robot_brain.safety.validator import SafetyValidator
 from robot_brain.skills.base import SkillResult
@@ -38,9 +45,18 @@ class RunResult(BaseModel):
 
 
 class AgentRuntime:
-    def __init__(self, context: AgentContext, checkpoints: CheckpointStore | None = None) -> None:
+    def __init__(
+        self,
+        context: AgentContext,
+        checkpoints: CheckpointRepository | None = None,
+        conversations: ConversationMemory | None = None,
+        database: SQLiteMemoryStore | None = None,
+    ) -> None:
         self.context = context
         self.checkpoints = checkpoints or CheckpointStore()
+        self.conversations = conversations or ConversationMemory()
+        self._database = database
+        self._restored_threads: set[str] = set()
         self.graph: BrainGraph = build_graph(context)
 
     @classmethod
@@ -53,8 +69,18 @@ class AgentRuntime:
         perception: PerceptionAdapter | None = None,
         llm: LLMClient | None = None,
         long_term: LongTermMemory | None = None,
+        conversations: ConversationMemory | None = None,
+        checkpoints: CheckpointRepository | None = None,
     ) -> "AgentRuntime":
         settings = settings or SETTINGS
+        database: SQLiteMemoryStore | None = None
+
+        def sqlite_database() -> SQLiteMemoryStore:
+            nonlocal database
+            if database is None:
+                database = SQLiteMemoryStore(settings.memory_db_path)
+            return database
+
         if robot is None:
             if settings.robot_backend != "mock":
                 raise ValueError(f"unsupported robot backend: {settings.robot_backend}")
@@ -72,6 +98,12 @@ class AgentRuntime:
                 llm = OpenAIClient(settings.openai_model)
             else:
                 raise ValueError(f"unsupported LLM backend: {settings.llm_backend}")
+        if long_term is None:
+            long_term = LongTermMemory(sqlite_database())
+        if conversations is None:
+            conversations = ConversationMemory(sqlite_database())
+        if checkpoints is None:
+            checkpoints = SQLiteCheckpointStore(sqlite_database())
         skills = SkillRegistry(default_skills())
         context = AgentContext(
             settings=settings,
@@ -83,12 +115,14 @@ class AgentRuntime:
             validator=SafetyValidator(settings, skills),
             estop=EmergencyStop(),
             short_term=ShortTermMemory(),
-            long_term=long_term or LongTermMemory(),
+            long_term=long_term,
         )
-        return cls(context)
+        return cls(context, checkpoints=checkpoints, conversations=conversations, database=database)
 
     async def run_command(self, command: str, *, thread_id: str | None = None) -> RunResult:
         thread_id = thread_id or str(uuid4())
+        self._restore_thread_context(thread_id)
+        self.conversations.add(thread_id=thread_id, role="user", content=command, message_type="command")
         initial: GraphState = {
             "command": command,
             "thread_id": thread_id,
@@ -108,9 +142,19 @@ class AgentRuntime:
         return result
 
     async def resume(self, thread_id: str, *, approved: bool) -> RunResult:
+        self._restore_thread_context(thread_id)
+        self.conversations.add(
+            thread_id=thread_id,
+            role="user",
+            content="operator approved pending action" if approved else "operator rejected pending action",
+            message_type="confirmation",
+            metadata={"approved": approved},
+        )
         checkpoint = self.checkpoints.pop(thread_id)
         if checkpoint is None:
-            return self._simple_result("missing_checkpoint", "no pending checkpoint", thread_id)
+            result = self._simple_result("missing_checkpoint", "no pending checkpoint", thread_id)
+            self._record_result(result)
+            return result
         if not approved:
             task = self.context.world.current_task
             if task is not None:
@@ -120,16 +164,23 @@ class AgentRuntime:
             self._remember(checkpoint.command, result)
             return result
 
+        observation = await self.context.perception.observe()
+        self.context.world.apply_observation(observation)
+        self.context.short_term.add(f"resume observation: {observation.model_dump(mode='json')}")
         validation = self.context.validator.validate(
             checkpoint.tool_call,
             self.context.world,
             confirmation_granted=True,
         )
         if not validation.allowed:
-            return self._simple_result("blocked", validation.reason, thread_id)
+            result = self._simple_result("blocked", validation.reason, thread_id)
+            self._remember(checkpoint.command, result)
+            return result
         skill = self.context.skills.get(checkpoint.tool_call.skill_name)
         if skill is None:
-            return self._simple_result("blocked", "skill disappeared from registry", thread_id)
+            result = self._simple_result("blocked", "skill disappeared from registry", thread_id)
+            self._remember(checkpoint.command, result)
+            return result
         params = skill.parse_params(validation.normalized_parameters)
         skill_result = await skill.execute(params, self.context.robot, self.context.world)
         observation = await self.context.perception.observe()
@@ -150,15 +201,32 @@ class AgentRuntime:
         return result
 
     async def handle_event(self, event: Event) -> RunResult:
+        if event.type == EventType.COMMAND:
+            return await self.run_command(event.message, thread_id=event.payload.get("thread_id"))
+        thread_id = str(event.payload.get("thread_id") or uuid4())
+        self._restore_thread_context(thread_id)
+        self.conversations.add(
+            thread_id=thread_id,
+            role="system",
+            content=event.message,
+            message_type=f"event:{event.type}",
+            metadata=event.payload,
+        )
         if event.type == EventType.INTERRUPT:
             await self.context.estop.activate(event.message, self.context.robot, self.context.world)
-            return self._simple_result("interrupted", event.message)
-        if event.type == EventType.COMMAND:
-            return await self.run_command(event.message)
-        return self._simple_result("ignored", f"event type is not actionable: {event.type}")
+            result = self._simple_result("interrupted", event.message, thread_id)
+            self._remember(event.message, result)
+            return result
+        result = self._simple_result("ignored", f"event type is not actionable: {event.type}", thread_id)
+        self._record_result(result)
+        return result
 
     def reset_estop(self) -> None:
         self.context.estop.reset(self.context.world)
+
+    def close(self) -> None:
+        if self._database is not None:
+            self._database.close()
 
     def _to_result(self, state: GraphState) -> RunResult:
         results = state.get("results", [])
@@ -178,3 +246,24 @@ class AgentRuntime:
     def _remember(self, command: str, result: RunResult) -> None:
         self.context.short_term.add(f"runtime result for {command!r}: {result.status} ({result.message})")
         self.context.long_term.add(Experience(objective=command, outcome=result.status, summary=result.message))
+        self._record_result(result)
+
+    def _record_result(self, result: RunResult) -> None:
+        if result.thread_id is None:
+            return
+        self.conversations.add(
+            thread_id=result.thread_id,
+            role="assistant",
+            content=result.message,
+            message_type="runtime_result",
+            metadata=result.model_dump(mode="json"),
+        )
+
+    def _restore_thread_context(self, thread_id: str) -> None:
+        if thread_id in self._restored_threads:
+            return
+        for message in self.conversations.recent(thread_id, limit=self.context.short_term.capacity):
+            self.context.short_term.add(
+                f"conversation {message.role}/{message.message_type}: {message.content}"
+            )
+        self._restored_threads.add(thread_id)

@@ -1,15 +1,17 @@
 """Replaceable long-term experience store with an in-memory default."""
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Protocol
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class Experience(BaseModel):
     objective: str
     outcome: str
     summary: str
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class ExperienceStore(Protocol):

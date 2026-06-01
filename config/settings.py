@@ -32,6 +32,9 @@ class Settings:
     max_loop_iterations: int = 50
     enable_verbose_log: bool = field(default_factory=lambda: _env_bool("RDB_VERBOSE", True))
 
+    # Local persistence.
+    memory_db_path: str = field(default_factory=lambda: os.getenv("RDB_MEMORY_DB", "data/robot_brain.sqlite3"))
+
     # Used only by the optional OpenAI adapter.
     openai_model: str = field(default_factory=lambda: os.getenv("RDB_OPENAI_MODEL", "gpt-4o-mini"))
 
