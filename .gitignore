@@ -1,0 +1,7 @@
+__pycache__/
+*.py[cod]
+.cursor/
+.pytest_cache/
+.deps/
+.venv/
+.vscode/
