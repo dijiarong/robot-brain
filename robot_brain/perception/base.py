@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from datetime import datetime, timezone
 
 from pydantic import BaseModel, Field
 
@@ -9,6 +10,7 @@ from robot_brain.core.world_state import DetectedObject, Position
 
 
 class Observation(BaseModel):
+    observed_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     position: Position | None = None
     heading_degrees: float | None = None
     battery_level: float | None = Field(default=None, ge=0.0, le=100.0)

@@ -24,6 +24,9 @@ class MockLLM(LLMClient):
             return [call.model_copy(deep=True) for call in self._scripted_plans.popleft()]
 
         text = command.lower()
+        if text.startswith("report warning:"):
+            message = command.split(":", maxsplit=1)[1].strip()
+            return [ToolCall(skill_name="report", parameters={"message": message, "severity": "warning"})]
         if "patrol" in text:
             return [ToolCall(skill_name="patrol", parameters={"waypoints": [{"x": 4, "y": 0}, {"x": 4, "y": 3}]})]
         if "navigate" in text or "go to" in text:

@@ -14,8 +14,12 @@ class OrchestrationNodes:
 
     async def perceive(self, state: GraphState) -> GraphState:
         observation = await self.context.perception.observe()
-        self.context.world.apply_observation(observation)
+        self.context.world.apply_observation(
+            observation,
+            object_ttl_seconds=self.context.settings.object_ttl_seconds,
+        )
         self.context.short_term.add(f"observation: {observation.model_dump(mode='json')}")
+        self._save_world(state, "perceive")
         return {"observation": observation.model_dump(mode="json"), "status": "perceived"}
 
     async def decide(self, state: GraphState) -> GraphState:
@@ -27,6 +31,7 @@ class OrchestrationNodes:
         else:
             task.status = "running"
         self.context.short_term.add(f"{decision.source} decision: {[call.skill_name for call in decision.tool_calls]}")
+        self._save_world(state, "decide")
         return {
             "queue": decision.tool_calls,
             "decision_source": decision.source,
@@ -73,6 +78,7 @@ class OrchestrationNodes:
             return {"status": "blocked", "error": f"unknown skill: {call.skill_name}"}
         params = skill.parse_params(validation.normalized_parameters)
         result = await skill.execute(params, self.context.robot, self.context.world)
+        self._save_world(state, f"execute:{call.skill_name}")
         return {"last_result": result, "status": "executed"}
 
     async def observe(self, state: GraphState) -> GraphState:
@@ -96,7 +102,9 @@ class OrchestrationNodes:
             task.status = "running" if needs_replan or state.get("queue") else "completed"
         if needs_replan:
             self.context.short_term.add("reflection requested replanning")
+            self._save_world(state, "reflect:replan")
             return {"results": results, "queue": [], "status": "replan"}
+        self._save_world(state, "reflect")
         return {"results": results, "status": "ready" if state.get("queue") else "completed"}
 
     async def finish(self, state: GraphState) -> GraphState:
@@ -105,4 +113,8 @@ class OrchestrationNodes:
         if task is not None and status in {"blocked", "failed", "awaiting_confirmation"}:
             task.status = "paused" if status == "awaiting_confirmation" else "failed"
             task.last_message = state.get("error", "")
+        self._save_world(state, f"finish:{status}")
         return {"status": status}
+
+    def _save_world(self, state: GraphState, reason: str) -> None:
+        self.context.world_states.save(self.context.world, reason=reason, thread_id=state.get("thread_id"))

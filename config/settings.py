@@ -27,9 +27,11 @@ class Settings:
     max_linear_speed: float = 1.5
     max_step_distance: float = 30.0
     require_confirmation_for: tuple[str, ...] = ("follow",)
+    object_ttl_seconds: float = 30.0
 
     # Runtime.
     max_loop_iterations: int = 50
+    default_task_max_attempts: int = 2
     enable_verbose_log: bool = field(default_factory=lambda: _env_bool("RDB_VERBOSE", True))
 
     # Local persistence.

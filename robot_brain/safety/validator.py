@@ -80,6 +80,9 @@ class SafetyValidator:
                 if previous.distance_to(waypoint) > self.settings.max_step_distance:
                     return "patrol waypoint exceeds max_step_distance"
                 previous = waypoint
-        if skill_name == "follow" and params["target_id"] not in world.known_objects:
-            return "follow target has not been perceived"
+        if skill_name == "follow" and not world.is_object_fresh(
+            params["target_id"],
+            self.settings.object_ttl_seconds,
+        ):
+            return "follow target has not been perceived recently"
         return ""

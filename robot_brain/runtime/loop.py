@@ -18,6 +18,8 @@ from robot_brain.memory.conversation import ConversationMemory
 from robot_brain.memory.long_term import Experience, LongTermMemory
 from robot_brain.memory.short_term import ShortTermMemory
 from robot_brain.memory.sqlite_store import SQLiteMemoryStore
+from robot_brain.memory.task_queue import TaskQueue
+from robot_brain.memory.world_state import WorldStateMemory
 from robot_brain.orchestration.graph import BrainGraph, build_graph
 from robot_brain.orchestration.state import GraphState
 from robot_brain.perception.base import PerceptionAdapter
@@ -51,10 +53,12 @@ class AgentRuntime:
         checkpoints: CheckpointRepository | None = None,
         conversations: ConversationMemory | None = None,
         database: SQLiteMemoryStore | None = None,
+        tasks: TaskQueue | None = None,
     ) -> None:
         self.context = context
         self.checkpoints = checkpoints or CheckpointStore()
         self.conversations = conversations or ConversationMemory()
+        self.tasks = tasks or TaskQueue()
         self._database = database
         self._restored_threads: set[str] = set()
         self.graph: BrainGraph = build_graph(context)
@@ -71,6 +75,8 @@ class AgentRuntime:
         long_term: LongTermMemory | None = None,
         conversations: ConversationMemory | None = None,
         checkpoints: CheckpointRepository | None = None,
+        world_states: WorldStateMemory | None = None,
+        tasks: TaskQueue | None = None,
     ) -> "AgentRuntime":
         settings = settings or SETTINGS
         database: SQLiteMemoryStore | None = None
@@ -104,10 +110,17 @@ class AgentRuntime:
             conversations = ConversationMemory(sqlite_database())
         if checkpoints is None:
             checkpoints = SQLiteCheckpointStore(sqlite_database())
+        if world_states is None:
+            world_states = WorldStateMemory(sqlite_database())
+        if tasks is None:
+            tasks = TaskQueue(sqlite_database())
+        if world is None:
+            snapshot = world_states.latest()
+            world = snapshot.state.model_copy(deep=True) if snapshot is not None else WorldState()
         skills = SkillRegistry(default_skills())
         context = AgentContext(
             settings=settings,
-            world=world or WorldState(),
+            world=world,
             robot=robot,
             perception=perception,
             llm=llm,
@@ -116,8 +129,9 @@ class AgentRuntime:
             estop=EmergencyStop(),
             short_term=ShortTermMemory(),
             long_term=long_term,
+            world_states=world_states,
         )
-        return cls(context, checkpoints=checkpoints, conversations=conversations, database=database)
+        return cls(context, checkpoints=checkpoints, conversations=conversations, database=database, tasks=tasks)
 
     async def run_command(self, command: str, *, thread_id: str | None = None) -> RunResult:
         thread_id = thread_id or str(uuid4())
@@ -160,13 +174,18 @@ class AgentRuntime:
             if task is not None:
                 task.status = "failed"
                 task.last_message = "operator rejected pending action"
+            self._save_world("resume:rejected", thread_id)
             result = self._simple_result("rejected", "operator rejected pending action", thread_id)
             self._remember(checkpoint.command, result)
             return result
 
         observation = await self.context.perception.observe()
-        self.context.world.apply_observation(observation)
+        self.context.world.apply_observation(
+            observation,
+            object_ttl_seconds=self.context.settings.object_ttl_seconds,
+        )
         self.context.short_term.add(f"resume observation: {observation.model_dump(mode='json')}")
+        self._save_world("resume:perceive", thread_id)
         validation = self.context.validator.validate(
             checkpoint.tool_call,
             self.context.world,
@@ -183,13 +202,18 @@ class AgentRuntime:
             return result
         params = skill.parse_params(validation.normalized_parameters)
         skill_result = await skill.execute(params, self.context.robot, self.context.world)
+        self._save_world(f"resume:execute:{checkpoint.tool_call.skill_name}", thread_id)
         observation = await self.context.perception.observe()
-        self.context.world.apply_observation(observation)
+        self.context.world.apply_observation(
+            observation,
+            object_ttl_seconds=self.context.settings.object_ttl_seconds,
+        )
         task = self.context.world.current_task
         if task is not None:
             task.completed_skills.append(checkpoint.tool_call.skill_name)
             task.status = "completed" if skill_result.success else "failed"
             task.last_message = skill_result.message
+        self._save_world("resume:complete", thread_id)
         result = RunResult(
             status="completed" if skill_result.success else "failed",
             message=skill_result.message,
@@ -214,6 +238,7 @@ class AgentRuntime:
         )
         if event.type == EventType.INTERRUPT:
             await self.context.estop.activate(event.message, self.context.robot, self.context.world)
+            self._save_world("event:interrupt", thread_id)
             result = self._simple_result("interrupted", event.message, thread_id)
             self._remember(event.message, result)
             return result
@@ -221,8 +246,18 @@ class AgentRuntime:
         self._record_result(result)
         return result
 
+    async def refresh_world(self, *, reason: str = "runtime:refresh", thread_id: str | None = None) -> None:
+        observation = await self.context.perception.observe()
+        self.context.world.apply_observation(
+            observation,
+            object_ttl_seconds=self.context.settings.object_ttl_seconds,
+        )
+        self.context.short_term.add(f"{reason} observation: {observation.model_dump(mode='json')}")
+        self._save_world(reason, thread_id)
+
     def reset_estop(self) -> None:
         self.context.estop.reset(self.context.world)
+        self._save_world("estop:reset")
 
     def close(self) -> None:
         if self._database is not None:
@@ -267,3 +302,6 @@ class AgentRuntime:
                 f"conversation {message.role}/{message.message_type}: {message.content}"
             )
         self._restored_threads.add(thread_id)
+
+    def _save_world(self, reason: str, thread_id: str | None = None) -> None:
+        self.context.world_states.save(self.context.world, reason=reason, thread_id=thread_id)

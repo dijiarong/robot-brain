@@ -6,7 +6,8 @@ import unittest
 
 from config.settings import Settings
 from robot_brain.actuation.mock import MockRobot
-from robot_brain.core.world_state import DetectedObject
+from robot_brain.core.events import Event, EventType
+from robot_brain.core.world_state import DetectedObject, Position
 from robot_brain.memory.conversation import ConversationMemory
 from robot_brain.memory.short_term import ShortTermMemory
 from robot_brain.memory.sqlite_store import SQLiteMemoryStore
@@ -84,6 +85,81 @@ class SQLiteMemoryTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(any("message 0" in item for item in recent))
             runtime.close()
             database.close()
+
+    async def test_world_state_survives_new_runtime(self) -> None:
+        with TemporaryDirectory() as directory:
+            settings = Settings(memory_db_path=str(Path(directory) / "memory.sqlite3"))
+            first_robot = MockRobot()
+            observation = Observation(
+                position=Position(x=3, y=4),
+                battery_level=77.0,
+                detected_objects=[DetectedObject(object_id="box-7", kind="package")],
+            )
+            first = AgentRuntime.create(
+                settings=settings,
+                robot=first_robot,
+                perception=MockPerception(first_robot, [observation, observation]),
+            )
+
+            await first.run_command("stop", thread_id="state-thread")
+            first.close()
+
+            second = AgentRuntime.create(settings=settings)
+
+            self.assertEqual(Position(x=3, y=4), second.context.world.position)
+            self.assertEqual(77.0, second.context.world.battery_level)
+            self.assertIn("box-7", second.context.world.known_objects)
+            self.assertEqual("stop", second.context.world.current_task.objective)
+            self.assertEqual("completed", second.context.world.current_task.status)
+            second.close()
+
+    async def test_estop_state_survives_restart_and_reset(self) -> None:
+        with TemporaryDirectory() as directory:
+            settings = Settings(memory_db_path=str(Path(directory) / "memory.sqlite3"))
+            first = AgentRuntime.create(settings=settings)
+
+            await first.handle_event(Event(type=EventType.INTERRUPT, message="operator stop"))
+            first.close()
+
+            second = AgentRuntime.create(settings=settings)
+            self.assertTrue(second.context.world.estop_active)
+            second.reset_estop()
+            second.close()
+
+            third = AgentRuntime.create(settings=settings)
+            self.assertFalse(third.context.world.estop_active)
+            third.close()
+
+    async def test_checkpoint_resume_uses_fresh_perception_for_safety(self) -> None:
+        with TemporaryDirectory() as directory:
+            settings = Settings(memory_db_path=str(Path(directory) / "memory.sqlite3"))
+            first_robot = MockRobot()
+            first = AgentRuntime.create(
+                settings=settings,
+                robot=first_robot,
+                perception=MockPerception(
+                    first_robot,
+                    [Observation(detected_objects=[DetectedObject(object_id="person-1", kind="person")])],
+                ),
+            )
+
+            pending = await first.run_command("follow person-1", thread_id="safe-resume-thread")
+            first.close()
+
+            second_robot = MockRobot()
+            second = AgentRuntime.create(
+                settings=settings,
+                robot=second_robot,
+                perception=MockPerception(second_robot, [Observation(battery_level=5.0)]),
+            )
+            resumed = await second.resume("safe-resume-thread", approved=True)
+
+            self.assertEqual("awaiting_confirmation", pending.status)
+            self.assertEqual("blocked", resumed.status)
+            self.assertIn("critical battery", resumed.message)
+            self.assertEqual(5.0, second.context.world.battery_level)
+            self.assertEqual([], second_robot.action_history)
+            second.close()
 
 
 if __name__ == "__main__":
