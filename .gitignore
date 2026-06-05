@@ -6,3 +6,6 @@ __pycache__/
 .venv/
 .vscode/
 data/
+
+# ZEPERION config + runtime artifacts (do not commit)
+.zeperion/
