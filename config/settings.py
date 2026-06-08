@@ -40,5 +40,16 @@ class Settings:
     # Used only by the optional OpenAI adapter.
     openai_model: str = field(default_factory=lambda: os.getenv("RDB_OPENAI_MODEL", "gpt-4o-mini"))
 
+    # Unitree robot adapter.
+    unitree_model: str = field(default_factory=lambda: os.getenv("RDB_UNITREE_MODEL", ""))
+    unitree_net_iface: str = field(default_factory=lambda: os.getenv("RDB_UNITREE_NET_IFACE", ""))
+    unitree_dry_run: bool = field(default_factory=lambda: _env_bool("RDB_UNITREE_DRY_RUN", True))
+    unitree_max_speed: float = field(
+        default_factory=lambda: float(os.getenv("RDB_UNITREE_MAX_SPEED", "0.5"))
+    )
+    unitree_max_step: float = field(
+        default_factory=lambda: float(os.getenv("RDB_UNITREE_MAX_STEP", "2.0"))
+    )
+
 
 SETTINGS = Settings()

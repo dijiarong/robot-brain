@@ -96,9 +96,14 @@ class AgentRuntime:
             return database
 
         if robot is None:
-            if settings.robot_backend != "mock":
+            if settings.robot_backend == "mock":
+                robot = MockRobot()
+            elif settings.robot_backend == "unitree":
+                from robot_brain.actuation.unitree import FakeUnitreeTransport, UnitreeRobot
+
+                robot = UnitreeRobot(FakeUnitreeTransport(), settings)
+            else:
                 raise ValueError(f"unsupported robot backend: {settings.robot_backend}")
-            robot = MockRobot()
         if perception is None:
             if settings.perception_backend != "mock":
                 raise ValueError(f"unsupported perception backend: {settings.perception_backend}")
