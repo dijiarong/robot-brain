@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from robot_brain.cognition.dual_system import DualSystem
 from robot_brain.core.context import AgentContext
+from robot_brain.core.errors import ErrorCode
 from robot_brain.core.world_state import TaskProgress
 from robot_brain.orchestration.state import GraphState
 
@@ -42,7 +43,12 @@ class OrchestrationNodes:
     async def select_action(self, state: GraphState) -> GraphState:
         iterations = state.get("iterations", 0) + 1
         if iterations > self.context.settings.max_loop_iterations:
-            return {"current_call": None, "error": "max_loop_iterations exceeded", "status": "failed"}
+            return {
+                "current_call": None,
+                "error": "max_loop_iterations exceeded",
+                "error_code": ErrorCode.RUNTIME_MAX_ITERATIONS,
+                "status": "failed",
+            }
         queue = list(state.get("queue", []))
         current_call = queue.pop(0) if queue else None
         status = state.get("status", "")
@@ -66,7 +72,12 @@ class OrchestrationNodes:
         else:
             status = "blocked"
         self.context.short_term.add(f"validation for {call.skill_name}: {status} ({validation.reason})")
-        return {"validation": validation, "status": status, "error": validation.reason}
+        return {
+            "validation": validation,
+            "status": status,
+            "error": validation.reason,
+            "error_code": validation.error_code,
+        }
 
     async def execute(self, state: GraphState) -> GraphState:
         call = state["current_call"]
@@ -75,7 +86,11 @@ class OrchestrationNodes:
             return {"status": "blocked"}
         skill = self.context.skills.get(call.skill_name)
         if skill is None:
-            return {"status": "blocked", "error": f"unknown skill: {call.skill_name}"}
+            return {
+                "status": "blocked",
+                "error": f"unknown skill: {call.skill_name}",
+                "error_code": ErrorCode.RUNTIME_SKILL_NOT_FOUND,
+            }
         params = skill.parse_params(validation.normalized_parameters)
         result = await skill.execute(params, self.context.robot, self.context.world)
         self._save_world(state, f"execute:{call.skill_name}")
@@ -89,7 +104,7 @@ class OrchestrationNodes:
         result = state.get("last_result")
         results = list(state.get("results", []))
         if result is None:
-            return {"status": "failed", "error": "execution produced no result"}
+            return {"status": "failed", "error": "execution produced no result", "error_code": ErrorCode.RUNTIME_NO_RESULT}
         results.append(result)
         self.context.short_term.add(f"result for {call.skill_name if call else 'unknown'}: {result.message}")
         skill = self.context.skills.get(call.skill_name) if call is not None else None

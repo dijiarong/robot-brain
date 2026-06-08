@@ -1,6 +1,7 @@
 """High-level runtime entry point for commands, interrupts, and resumes."""
 from __future__ import annotations
 
+import time
 from typing import Any
 from uuid import uuid4
 
@@ -10,12 +11,15 @@ from config.settings import SETTINGS, Settings
 from robot_brain.actuation.base import RobotInterface
 from robot_brain.actuation.mock import MockRobot
 from robot_brain.core.context import AgentContext
+from robot_brain.core.errors import ErrorCode
 from robot_brain.core.events import Event, EventType
 from robot_brain.core.world_state import WorldState
 from robot_brain.llm.base import LLMClient
 from robot_brain.llm.mock import MockLLM
 from robot_brain.memory.conversation import ConversationMemory
+from robot_brain.memory.execution_summary import ExecutionSummary, ExecutionSummaryStore, InMemoryExecutionSummaryStore
 from robot_brain.memory.long_term import Experience, LongTermMemory
+from robot_brain.memory.semantic_store import SemanticExperienceStore, SQLiteSemanticStore
 from robot_brain.memory.short_term import ShortTermMemory
 from robot_brain.memory.sqlite_store import SQLiteMemoryStore
 from robot_brain.memory.task_queue import TaskQueue
@@ -40,6 +44,7 @@ from robot_brain.skills.registry import SkillRegistry
 class RunResult(BaseModel):
     status: str
     message: str = ""
+    error_code: ErrorCode | None = None
     thread_id: str | None = None
     decision_source: str = ""
     results: list[SkillResult] = Field(default_factory=list)
@@ -54,11 +59,13 @@ class AgentRuntime:
         conversations: ConversationMemory | None = None,
         database: SQLiteMemoryStore | None = None,
         tasks: TaskQueue | None = None,
+        summaries: ExecutionSummaryStore | None = None,
     ) -> None:
         self.context = context
         self.checkpoints = checkpoints or CheckpointStore()
         self.conversations = conversations or ConversationMemory()
         self.tasks = tasks or TaskQueue()
+        self.summaries = summaries or InMemoryExecutionSummaryStore()
         self._database = database
         self._restored_threads: set[str] = set()
         self.graph: BrainGraph = build_graph(context)
@@ -77,6 +84,7 @@ class AgentRuntime:
         checkpoints: CheckpointRepository | None = None,
         world_states: WorldStateMemory | None = None,
         tasks: TaskQueue | None = None,
+        summaries: ExecutionSummaryStore | None = None,
     ) -> "AgentRuntime":
         settings = settings or SETTINGS
         database: SQLiteMemoryStore | None = None
@@ -95,17 +103,20 @@ class AgentRuntime:
             if settings.perception_backend != "mock":
                 raise ValueError(f"unsupported perception backend: {settings.perception_backend}")
             perception = MockPerception(robot)
+        skills = SkillRegistry(default_skills())
         if llm is None:
             if settings.llm_backend == "mock":
                 llm = MockLLM()
             elif settings.llm_backend == "openai":
                 from robot_brain.llm.openai_client import OpenAIClient
 
-                llm = OpenAIClient(settings.openai_model)
+                llm = OpenAIClient(settings.openai_model, skills=skills)
             else:
                 raise ValueError(f"unsupported LLM backend: {settings.llm_backend}")
+        elif hasattr(llm, "set_skills"):
+            llm.set_skills(skills)
         if long_term is None:
-            long_term = LongTermMemory(sqlite_database())
+            long_term = LongTermMemory(SQLiteSemanticStore(sqlite_database()))
         if conversations is None:
             conversations = ConversationMemory(sqlite_database())
         if checkpoints is None:
@@ -114,10 +125,11 @@ class AgentRuntime:
             world_states = WorldStateMemory(sqlite_database())
         if tasks is None:
             tasks = TaskQueue(sqlite_database())
+        if summaries is None:
+            summaries = sqlite_database()
         if world is None:
             snapshot = world_states.latest()
             world = snapshot.state.model_copy(deep=True) if snapshot is not None else WorldState()
-        skills = SkillRegistry(default_skills())
         context = AgentContext(
             settings=settings,
             world=world,
@@ -131,10 +143,18 @@ class AgentRuntime:
             long_term=long_term,
             world_states=world_states,
         )
-        return cls(context, checkpoints=checkpoints, conversations=conversations, database=database, tasks=tasks)
+        return cls(
+            context,
+            checkpoints=checkpoints,
+            conversations=conversations,
+            database=database,
+            tasks=tasks,
+            summaries=summaries,
+        )
 
     async def run_command(self, command: str, *, thread_id: str | None = None) -> RunResult:
         thread_id = thread_id or str(uuid4())
+        start_time = time.monotonic()
         self._restore_thread_context(thread_id)
         self.conversations.add(thread_id=thread_id, role="user", content=command, message_type="command")
         initial: GraphState = {
@@ -152,7 +172,10 @@ class AgentRuntime:
                 PendingCheckpoint(thread_id=thread_id, command=command, tool_call=final["current_call"])
             )
         result = self._to_result(final)
+        duration = time.monotonic() - start_time
         self._remember(command, result)
+        self._save_execution_summary(command, result, duration)
+        self._save_decision_context(command, result, final)
         return result
 
     async def resume(self, thread_id: str, *, approved: bool) -> RunResult:
@@ -166,7 +189,10 @@ class AgentRuntime:
         )
         checkpoint = self.checkpoints.pop(thread_id)
         if checkpoint is None:
-            result = self._simple_result("missing_checkpoint", "no pending checkpoint", thread_id)
+            result = self._simple_result(
+                "missing_checkpoint", "no pending checkpoint", thread_id,
+                error_code=ErrorCode.RUNTIME_MISSING_CHECKPOINT,
+            )
             self._record_result(result)
             return result
         if not approved:
@@ -192,12 +218,18 @@ class AgentRuntime:
             confirmation_granted=True,
         )
         if not validation.allowed:
-            result = self._simple_result("blocked", validation.reason, thread_id)
+            result = self._simple_result(
+                "blocked", validation.reason, thread_id,
+                error_code=validation.error_code,
+            )
             self._remember(checkpoint.command, result)
             return result
         skill = self.context.skills.get(checkpoint.tool_call.skill_name)
         if skill is None:
-            result = self._simple_result("blocked", "skill disappeared from registry", thread_id)
+            result = self._simple_result(
+                "blocked", "skill disappeared from registry", thread_id,
+                error_code=ErrorCode.RUNTIME_SKILL_NOT_FOUND,
+            )
             self._remember(checkpoint.command, result)
             return result
         params = skill.parse_params(validation.normalized_parameters)
@@ -269,14 +301,20 @@ class AgentRuntime:
         return RunResult(
             status=state.get("status", "completed"),
             message=message,
+            error_code=state.get("error_code"),
             thread_id=state.get("thread_id"),
             decision_source=state.get("decision_source", ""),
             results=results,
             world=self.context.world.snapshot(),
         )
 
-    def _simple_result(self, status: str, message: str, thread_id: str | None = None) -> RunResult:
-        return RunResult(status=status, message=message, thread_id=thread_id, world=self.context.world.snapshot())
+    def _simple_result(
+        self, status: str, message: str, thread_id: str | None = None, *, error_code: ErrorCode | None = None,
+    ) -> RunResult:
+        return RunResult(
+            status=status, message=message, error_code=error_code,
+            thread_id=thread_id, world=self.context.world.snapshot(),
+        )
 
     def _remember(self, command: str, result: RunResult) -> None:
         self.context.short_term.add(f"runtime result for {command!r}: {result.status} ({result.message})")
@@ -302,6 +340,57 @@ class AgentRuntime:
                 f"conversation {message.role}/{message.message_type}: {message.content}"
             )
         self._restored_threads.add(thread_id)
+
+    def _save_execution_summary(self, command: str, result: RunResult, duration: float) -> None:
+        if result.thread_id is None:
+            return
+        # Gather executed skill names from the world state's current task
+        task = self.context.world.current_task
+        skills_executed = list(task.completed_skills) if task is not None else []
+
+        # Gather memory refs from long-term search
+        experiences = self.context.long_term.search(command, limit=3)
+        memory_refs = [exp.summary for exp in experiences]
+
+        summary = ExecutionSummary(
+            thread_id=result.thread_id,
+            task_id=None,
+            objective=command,
+            outcome=result.status,
+            skills_executed=skills_executed,
+            duration_seconds=duration,
+            failure_reason=result.message if result.status in ("failed", "blocked") else None,
+            memory_refs=memory_refs,
+            decision_source=result.decision_source,
+        )
+        self.summaries.save_summary(summary)
+
+    def _save_decision_context(self, command: str, result: RunResult, final: GraphState) -> None:
+        if result.thread_id is None or self._database is None:
+            return
+        experiences = self.context.long_term.search(command, limit=3)
+        memory_refs = [exp.summary for exp in experiences]
+
+        # Gather skill names from world state task progress
+        task = self.context.world.current_task
+        chosen_skills = list(task.completed_skills) if task is not None else []
+
+        safety_result = "allowed"
+        if result.status == "blocked":
+            safety_result = f"blocked: {result.message}"
+        elif result.status == "awaiting_confirmation":
+            safety_result = "awaiting_confirmation"
+
+        self._database.save_decision_context(
+            thread_id=result.thread_id,
+            command=command,
+            chosen_skills=chosen_skills,
+            reason=result.decision_source or "planner",
+            memory_refs=memory_refs,
+            safety_result=safety_result,
+            next_plan="completed" if result.status == "completed" else result.message,
+            is_degraded=getattr(self.context.llm, "is_degraded", False),
+        )
 
     def _save_world(self, reason: str, thread_id: str | None = None) -> None:
         self.context.world_states.save(self.context.world, reason=reason, thread_id=thread_id)

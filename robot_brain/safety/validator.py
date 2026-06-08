@@ -6,6 +6,7 @@ from typing import Any
 from pydantic import BaseModel, Field, ValidationError
 
 from config.settings import Settings
+from robot_brain.core.errors import ErrorCode
 from robot_brain.core.world_state import Position, WorldState
 from robot_brain.llm.base import ToolCall
 from robot_brain.skills.registry import SkillRegistry
@@ -14,6 +15,7 @@ from robot_brain.skills.registry import SkillRegistry
 class ValidationResult(BaseModel):
     allowed: bool
     reason: str = ""
+    error_code: ErrorCode | None = None
     requires_confirmation: bool = False
     normalized_parameters: dict[str, Any] = Field(default_factory=dict)
 
@@ -34,31 +36,56 @@ class SafetyValidator:
     ) -> ValidationResult:
         skill = self.skills.get(call.skill_name)
         if skill is None:
-            return ValidationResult(allowed=False, reason=f"skill is not whitelisted: {call.skill_name}")
+            return ValidationResult(
+                allowed=False,
+                reason=f"skill is not whitelisted: {call.skill_name}",
+                error_code=ErrorCode.SAFETY_NOT_WHITELISTED,
+            )
 
         try:
             params = skill.parse_params(call.parameters)
         except ValidationError as exc:
-            return ValidationResult(allowed=False, reason=f"invalid parameters: {exc.errors()}")
+            return ValidationResult(
+                allowed=False,
+                reason=f"invalid parameters: {exc.errors()}",
+                error_code=ErrorCode.SAFETY_INVALID_PARAMS,
+            )
         normalized = params.model_dump(mode="json")
 
         if world.estop_active and call.skill_name not in self.ALWAYS_ALLOWED:
-            return ValidationResult(allowed=False, reason="emergency stop is active")
+            return ValidationResult(
+                allowed=False,
+                reason="emergency stop is active",
+                error_code=ErrorCode.SAFETY_ESTOP_ACTIVE,
+            )
         if (
             world.battery_level <= self.settings.critical_battery_threshold
             and call.skill_name not in self.ALWAYS_ALLOWED
         ):
-            return ValidationResult(allowed=False, reason="critical battery only permits stop, dock, or report")
+            return ValidationResult(
+                allowed=False,
+                reason="critical battery only permits stop, dock, or report",
+                error_code=ErrorCode.SAFETY_BATTERY_CRITICAL,
+            )
         if not skill.preconditions(world):
-            return ValidationResult(allowed=False, reason=f"preconditions failed for {call.skill_name}")
+            return ValidationResult(
+                allowed=False,
+                reason=f"preconditions failed for {call.skill_name}",
+                error_code=ErrorCode.SAFETY_PRECONDITION_FAILED,
+            )
 
         error = self._validate_motion(call.skill_name, normalized, world)
         if error:
-            return ValidationResult(allowed=False, reason=error)
+            return ValidationResult(
+                allowed=False,
+                reason=error,
+                error_code=ErrorCode.SAFETY_MOTION_VIOLATION,
+            )
         if call.skill_name in self.settings.require_confirmation_for and not confirmation_granted:
             return ValidationResult(
                 allowed=False,
                 reason=f"{call.skill_name} requires operator confirmation",
+                error_code=ErrorCode.SAFETY_CONFIRMATION_REQUIRED,
                 requires_confirmation=True,
                 normalized_parameters=normalized,
             )

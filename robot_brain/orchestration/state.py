@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from typing import Any, TypedDict
 
+from robot_brain.core.errors import ErrorCode
 from robot_brain.llm.base import ToolCall
 from robot_brain.safety.validator import ValidationResult
 from robot_brain.skills.base import SkillResult
@@ -18,6 +19,7 @@ class GraphState(TypedDict, total=False):
     results: list[SkillResult]
     status: str
     error: str
+    error_code: ErrorCode | None
     decision_source: str
     confirmation_granted: bool
     iterations: int

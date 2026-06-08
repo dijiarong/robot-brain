@@ -20,17 +20,20 @@ class SkillRegistry:
     def get(self, name: str) -> Skill | None:
         return self._skills.get(name)
 
+    def has(self, name: str) -> bool:
+        return name in self._skills
+
     def names(self) -> tuple[str, ...]:
         return tuple(self._skills)
 
-    def tools(self) -> list[dict[str, object]]:
+    def tools(self, *, strict: bool = True) -> list[dict[str, object]]:
         return [
             {
                 "type": "function",
                 "name": skill.name,
                 "description": skill.description,
                 "parameters": skill.params_schema(),
-                "strict": False,
+                "strict": strict,
             }
             for skill in self._skills.values()
         ]

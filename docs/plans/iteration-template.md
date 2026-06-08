@@ -2,7 +2,8 @@
 
 ## 基本信息
 
-- 日期：YYYY-MM-DD
+- 创建时间：YYYY-MM-DD HH:MM:SS TZ
+- 文件序号：YYYY-MM-DD-HHMMSS
 - 状态：计划中
 - 负责人：
 

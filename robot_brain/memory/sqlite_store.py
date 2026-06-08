@@ -10,6 +10,7 @@ from typing import Any
 
 from robot_brain.core.tasks import ScheduledTask
 from robot_brain.memory.conversation import ConversationMessage
+from robot_brain.memory.execution_summary import ExecutionSummary
 from robot_brain.memory.long_term import Experience
 from robot_brain.memory.world_state import WorldStateSnapshot
 
@@ -94,6 +95,40 @@ class SQLiteMemoryStore:
 
                 CREATE INDEX IF NOT EXISTS idx_scheduled_tasks_status_priority
                     ON scheduled_tasks(status, priority DESC, created_at, task_id);
+
+                CREATE TABLE IF NOT EXISTS execution_summaries (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    thread_id TEXT NOT NULL,
+                    task_id TEXT,
+                    objective TEXT NOT NULL,
+                    outcome TEXT NOT NULL,
+                    skills_executed TEXT NOT NULL,
+                    duration_seconds REAL NOT NULL,
+                    failure_reason TEXT,
+                    memory_refs TEXT NOT NULL,
+                    decision_source TEXT NOT NULL,
+                    metadata_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_execution_summaries_thread
+                    ON execution_summaries(thread_id, created_at DESC);
+
+                CREATE TABLE IF NOT EXISTS decision_context (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    thread_id TEXT NOT NULL,
+                    command TEXT NOT NULL,
+                    chosen_skills TEXT NOT NULL,
+                    reason TEXT NOT NULL,
+                    memory_refs TEXT NOT NULL,
+                    safety_result TEXT NOT NULL,
+                    next_plan TEXT NOT NULL,
+                    is_degraded INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_decision_context_created
+                    ON decision_context(created_at DESC);
                 """
             )
 
@@ -323,6 +358,198 @@ class SQLiteMemoryStore:
             created_at=datetime.fromisoformat(row["created_at"]),
             updated_at=datetime.fromisoformat(row["updated_at"]),
         )
+
+    # --- Execution Summaries ---
+
+    def save_summary(self, summary: ExecutionSummary) -> None:
+        with self._lock, self._connection:
+            self._connection.execute(
+                """
+                INSERT INTO execution_summaries(
+                    thread_id, task_id, objective, outcome, skills_executed,
+                    duration_seconds, failure_reason, memory_refs, decision_source,
+                    metadata_json, created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    summary.thread_id,
+                    summary.task_id,
+                    summary.objective,
+                    summary.outcome,
+                    json.dumps(summary.skills_executed),
+                    summary.duration_seconds,
+                    summary.failure_reason,
+                    json.dumps(summary.memory_refs),
+                    summary.decision_source,
+                    json.dumps(summary.metadata, ensure_ascii=False, default=str),
+                    summary.created_at.isoformat(),
+                ),
+            )
+
+    def get_summary(self, thread_id: str) -> ExecutionSummary | None:
+        with self._lock:
+            row = self._connection.execute(
+                """
+                SELECT * FROM execution_summaries
+                WHERE thread_id = ?
+                ORDER BY created_at DESC, id DESC
+                LIMIT 1
+                """,
+                (thread_id,),
+            ).fetchone()
+        return self._summary_from_row(row) if row is not None else None
+
+    def list_summaries(self, limit: int = 20) -> list[ExecutionSummary]:
+        with self._lock:
+            rows = self._connection.execute(
+                """
+                SELECT * FROM execution_summaries
+                ORDER BY created_at DESC, id DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+        return [self._summary_from_row(row) for row in rows]
+
+    @staticmethod
+    def _summary_from_row(row: sqlite3.Row) -> ExecutionSummary:
+        return ExecutionSummary(
+            thread_id=row["thread_id"],
+            task_id=row["task_id"],
+            objective=row["objective"],
+            outcome=row["outcome"],
+            skills_executed=json.loads(row["skills_executed"]),
+            duration_seconds=row["duration_seconds"],
+            failure_reason=row["failure_reason"],
+            memory_refs=json.loads(row["memory_refs"]),
+            decision_source=row["decision_source"],
+            metadata=json.loads(row["metadata_json"]),
+            created_at=datetime.fromisoformat(row["created_at"]),
+        )
+
+    # --- Decision Context ---
+
+    def save_decision_context(
+        self,
+        *,
+        thread_id: str,
+        command: str,
+        chosen_skills: list[str],
+        reason: str,
+        memory_refs: list[str],
+        safety_result: str,
+        next_plan: str,
+        is_degraded: bool = False,
+    ) -> None:
+        with self._lock, self._connection:
+            self._connection.execute(
+                """
+                INSERT INTO decision_context(
+                    thread_id, command, chosen_skills, reason, memory_refs,
+                    safety_result, next_plan, is_degraded, created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    thread_id,
+                    command,
+                    json.dumps(chosen_skills),
+                    reason,
+                    json.dumps(memory_refs),
+                    safety_result,
+                    next_plan,
+                    1 if is_degraded else 0,
+                    _utc_now(),
+                ),
+            )
+
+    def latest_decision_context(self) -> dict[str, Any] | None:
+        with self._lock:
+            row = self._connection.execute(
+                """
+                SELECT * FROM decision_context
+                ORDER BY created_at DESC, id DESC
+                LIMIT 1
+                """
+            ).fetchone()
+        if row is None:
+            return None
+        return {
+            "thread_id": row["thread_id"],
+            "command": row["command"],
+            "chosen_skills": json.loads(row["chosen_skills"]),
+            "reason": row["reason"],
+            "memory_refs": json.loads(row["memory_refs"]),
+            "safety_result": row["safety_result"],
+            "next_plan": row["next_plan"],
+            "is_degraded": bool(row["is_degraded"]),
+            "created_at": row["created_at"],
+        }
+
+    # --- Thread Replay ---
+
+    def thread_replay(self, thread_id: str) -> dict[str, Any]:
+        """Return complete replay data for a thread: messages, tasks, world states."""
+        with self._lock:
+            messages = self._connection.execute(
+                """
+                SELECT thread_id, role, message_type, content, metadata_json, created_at
+                FROM messages WHERE thread_id = ? ORDER BY created_at, id
+                """,
+                (thread_id,),
+            ).fetchall()
+
+            tasks = self._connection.execute(
+                "SELECT * FROM scheduled_tasks WHERE thread_id = ? ORDER BY created_at",
+                (thread_id,),
+            ).fetchall()
+
+            world_states = self._connection.execute(
+                """
+                SELECT thread_id, reason, state_json, created_at
+                FROM world_state_snapshots WHERE thread_id = ? ORDER BY created_at, id
+                """,
+                (thread_id,),
+            ).fetchall()
+
+            summaries = self._connection.execute(
+                """
+                SELECT * FROM execution_summaries
+                WHERE thread_id = ? ORDER BY created_at, id
+                """,
+                (thread_id,),
+            ).fetchall()
+
+        return {
+            "thread_id": thread_id,
+            "messages": [
+                {
+                    "role": row["role"],
+                    "message_type": row["message_type"],
+                    "content": row["content"],
+                    "metadata": json.loads(row["metadata_json"]),
+                    "created_at": row["created_at"],
+                }
+                for row in messages
+            ],
+            "tasks": [
+                self._task_from_row(row).model_dump(mode="json")
+                for row in tasks
+            ],
+            "world_states": [
+                {
+                    "reason": row["reason"],
+                    "state": json.loads(row["state_json"]),
+                    "created_at": row["created_at"],
+                }
+                for row in world_states
+            ],
+            "execution_summaries": [
+                self._summary_from_row(row).model_dump(mode="json")
+                for row in summaries
+            ],
+        }
 
     def close(self) -> None:
         with self._lock:

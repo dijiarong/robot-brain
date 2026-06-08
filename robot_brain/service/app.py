@@ -103,6 +103,38 @@ def create_app(service: AgentService | None = None) -> FastAPI:
         tasks = await service.reset_estop()
         return {"status": "reset", "resumed_tasks": tasks}
 
+    @app.get("/api/threads/{thread_id}/replay")
+    async def thread_replay(thread_id: str) -> dict[str, object]:
+        runtime = service.scheduler.runtime
+        if runtime._database is None:
+            raise HTTPException(status_code=503, detail="no database configured")
+        replay = runtime._database.thread_replay(thread_id)
+        if not replay["messages"] and not replay["tasks"] and not replay["world_states"]:
+            raise HTTPException(status_code=404, detail="thread not found or empty")
+        return replay
+
+    @app.get("/api/decision/latest")
+    async def latest_decision() -> dict[str, object]:
+        runtime = service.scheduler.runtime
+        if runtime._database is None:
+            raise HTTPException(status_code=503, detail="no database configured")
+        decision = runtime._database.latest_decision_context()
+        if decision is None:
+            raise HTTPException(status_code=404, detail="no decision recorded yet")
+        return decision
+
+    @app.get("/api/summaries")
+    async def list_summaries(limit: int = 20) -> list[dict[str, object]]:
+        summaries = service.scheduler.runtime.summaries.list_summaries(limit)
+        return [s.model_dump(mode="json") for s in summaries]
+
+    @app.get("/api/summaries/{thread_id}")
+    async def get_summary(thread_id: str) -> dict[str, object]:
+        summary = service.scheduler.runtime.summaries.get_summary(thread_id)
+        if summary is None:
+            raise HTTPException(status_code=404, detail="no summary for thread")
+        return summary.model_dump(mode="json")
+
     @app.websocket("/ws")
     async def websocket_status(websocket: WebSocket) -> None:
         await websocket.accept()
