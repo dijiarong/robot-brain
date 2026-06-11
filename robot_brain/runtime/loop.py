@@ -101,7 +101,17 @@ class AgentRuntime:
             elif settings.robot_backend == "unitree":
                 from robot_brain.actuation.unitree import FakeUnitreeTransport, UnitreeRobot
 
-                robot = UnitreeRobot(FakeUnitreeTransport(), settings)
+                if settings.unitree_transport == "sdk":
+                    from robot_brain.actuation.unitree_sdk import create_sdk_transport
+
+                    transport = create_sdk_transport(settings)
+                elif settings.unitree_transport == "webrtc":
+                    from robot_brain.actuation.unitree_webrtc import create_webrtc_transport
+
+                    transport = create_webrtc_transport(settings)
+                else:
+                    transport = FakeUnitreeTransport()
+                robot = UnitreeRobot(transport, settings)
             else:
                 raise ValueError(f"unsupported robot backend: {settings.robot_backend}")
         if perception is None:

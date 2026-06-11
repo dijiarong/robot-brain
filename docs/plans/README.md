@@ -11,6 +11,8 @@
 - [第四次迭代：后台服务、控制 API 与状态页面](./2026-06-02-service-api-dashboard.md)：将 scheduler 包装为常驻服务，并提供 HTTP、WebSocket 与轻量控制台。
 - [第五次迭代：LLM 输出校验与错误码](./2026-06-08-llm-validation-error-codes.md)：在 LLM 层加入结构化输出校验，引入统一 ErrorCode 枚举覆盖全链路错误传播。
 - [第六次迭代：Unitree 机器狗适配与真机安全闭环](./2026-06-08-093904-unitree-robot-adapter.md)：接入宇树机器狗适配层，先只读再低速短步动作，保持 mock 默认与安全边界。
+- [第七次迭代：真实 Unitree SDK Transport 接入与只读实机验证](./2026-06-08-101349-unitree-sdk-transport-readonly.md)：把 Unitree transport 抽象接到真实 SDK 或通信接口，先完成只读状态验证，不开放真实动作。
+- [第八次迭代：WebRTC 真实姿态/急停动作下发与安全门](./2026-06-08-141602-unitree-webrtc-posture-actions.md)：在 WebRTC transport 开放不产生平移的姿态/急停命令，引入 enable_motion 硬安全门，平移仍拒绝。
 
 ## 新增计划
 

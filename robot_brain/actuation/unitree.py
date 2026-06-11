@@ -100,10 +100,19 @@ class FakeUnitreeTransport(UnitreeTransport):
             self._state.is_moving = False
         elif command.action == "turn":
             self._state.heading_degrees = command.parameters.get("heading_degrees", 0)
+        elif command.action == "drive":
+            # Velocity teleop is open-loop; the fake just reflects that the
+            # robot was briefly moving and ends stopped (auto-stop).
+            self._state.is_moving = False
 
 
 class UnitreeRobot(RobotInterface):
     """Unitree adapter with internal safety clamps and dry-run support."""
+
+    # Non-translating posture commands supported by live transports.
+    ALLOWED_POSTURES = frozenset(
+        {"balance_stand", "stand_up", "stand_down", "recovery_stand", "damp", "sit"}
+    )
 
     def __init__(self, transport: UnitreeTransport, settings: Settings) -> None:
         self._transport = transport
@@ -205,6 +214,79 @@ class UnitreeRobot(RobotInterface):
             logger.error("turn failed, issuing best-effort stop: %s", exc)
             await self.stop(f"turn exception: {exc}")
             raise RuntimeError(f"Unitree turn failed: {exc}") from exc
+
+    async def set_posture(self, posture: str) -> None:
+        """Issue a non-translating posture/stop command (Unitree-specific).
+
+        Honors dry-run; on failure issues a best-effort stop and re-raises.
+        """
+        if posture not in self.ALLOWED_POSTURES:
+            self._record("set_posture", posture=posture, success=False, reason="unsupported")
+            raise ValueError(
+                f"Unsupported posture '{posture}'. Allowed: {sorted(self.ALLOWED_POSTURES)}"
+            )
+
+        self._record("set_posture", posture=posture)
+
+        if self.dry_run:
+            logger.info("[DRY-RUN] set_posture: %s", posture)
+            return
+
+        try:
+            await self._transport.send_command(UnitreeCommand(action=posture))
+        except Exception as exc:
+            logger.error("set_posture(%s) failed, issuing best-effort stop: %s", posture, exc)
+            await self.stop(f"set_posture exception: {exc}")
+            raise RuntimeError(f"Unitree set_posture failed: {exc}") from exc
+
+    async def drive(
+        self,
+        vx: float = 0.0,
+        vy: float = 0.0,
+        vyaw: float = 0.0,
+        duration: float = 0.5,
+    ) -> None:
+        """Velocity teleop over the joystick channel (Unitree-specific).
+
+        Body-frame velocities: ``vx`` forward (m/s), ``vy`` left (m/s),
+        ``vyaw`` counter-clockwise (rad/s). The robot holds the velocity for
+        ``duration`` seconds, then auto-stops. All inputs are clamped to the
+        configured safety limits. Honors dry-run; on failure issues a
+        best-effort stop and re-raises.
+        """
+        max_lin = min(self._settings.unitree_max_speed, self._settings.max_linear_speed)
+        max_yaw = self._settings.unitree_max_yaw_speed
+        max_dur = self._settings.unitree_max_drive_duration
+
+        cvx = max(-max_lin, min(max_lin, vx))
+        cvy = max(-max_lin, min(max_lin, vy))
+        cvyaw = max(-max_yaw, min(max_yaw, vyaw))
+        cdur = max(0.0, min(max_dur, duration))
+
+        self._record(
+            "drive", vx=cvx, vy=cvy, vyaw=cvyaw, duration=cdur,
+            original={"vx": vx, "vy": vy, "vyaw": vyaw, "duration": duration},
+        )
+        self._stopped = False
+
+        if self.dry_run:
+            logger.info(
+                "[DRY-RUN] drive vx=%.2f vy=%.2f vyaw=%.2f dur=%.2fs",
+                cvx, cvy, cvyaw, cdur,
+            )
+            return
+
+        try:
+            await self._transport.send_command(
+                UnitreeCommand(
+                    action="drive",
+                    parameters={"vx": cvx, "vy": cvy, "vyaw": cvyaw, "duration": cdur},
+                )
+            )
+        except Exception as exc:
+            logger.error("drive failed, issuing best-effort stop: %s", exc)
+            await self.stop(f"drive exception: {exc}")
+            raise RuntimeError(f"Unitree drive failed: {exc}") from exc
 
     async def dock(self, station: str) -> None:
         self._record("dock", station=station, supported=False)
