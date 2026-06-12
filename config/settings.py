@@ -45,10 +45,15 @@ class Settings:
     unitree_model: str = field(default_factory=lambda: os.getenv("RDB_UNITREE_MODEL", "go2"))
     # CycloneDDS network interface name for SDK transport (e.g. "en0"), NOT robot IP.
     unitree_net_iface: str = field(default_factory=lambda: os.getenv("RDB_UNITREE_NET_IFACE", ""))
-    # Robot IP for WebRTC LocalSTA (router/LAN or AP mode). Also reads UNITREE_ROBOT_IP.
+    # Robot IP for WebRTC LocalSTA (router/LAN or AP mode).
+    # Also reads UNITREE_ROBOT_IP, DIMOS_ROBOT_IP, ROBOT_IP (DimOS convention).
     unitree_robot_ip: str = field(
-        default_factory=lambda: os.getenv("RDB_UNITREE_ROBOT_IP")
-        or os.getenv("UNITREE_ROBOT_IP", "")
+        default_factory=lambda: (
+            os.getenv("RDB_UNITREE_ROBOT_IP")
+            or os.getenv("UNITREE_ROBOT_IP")
+            or os.getenv("DIMOS_ROBOT_IP")
+            or os.getenv("ROBOT_IP", "")
+        )
     )
     # Optional Go2 serial for WebRTC multicast discovery when IP is unknown.
     unitree_serial: str = field(default_factory=lambda: os.getenv("RDB_UNITREE_SERIAL", ""))
@@ -67,17 +72,38 @@ class Settings:
         default_factory=lambda: os.getenv("RDB_UNITREE_MOTION_MODE", "mcf")
     )
     unitree_max_speed: float = field(
-        default_factory=lambda: float(os.getenv("RDB_UNITREE_MAX_SPEED", "0.5"))
+        default_factory=lambda: float(os.getenv("RDB_UNITREE_MAX_SPEED", "0.2"))
     )
     unitree_max_step: float = field(
         default_factory=lambda: float(os.getenv("RDB_UNITREE_MAX_STEP", "2.0"))
     )
     # Velocity-teleop (joystick "drive") safety clamps.
     unitree_max_yaw_speed: float = field(
-        default_factory=lambda: float(os.getenv("RDB_UNITREE_MAX_YAW_SPEED", "1.0"))
+        default_factory=lambda: float(os.getenv("RDB_UNITREE_MAX_YAW_SPEED", "0.3"))
     )
     unitree_max_drive_duration: float = field(
-        default_factory=lambda: float(os.getenv("RDB_UNITREE_MAX_DRIVE_DURATION", "2.0"))
+        default_factory=lambda: float(os.getenv("RDB_UNITREE_MAX_DRIVE_DURATION", "0.5"))
+    )
+    # Live control loop (iteration 9): watchdog, state freshness, zero-frame count.
+    unitree_control_watchdog_seconds: float = field(
+        default_factory=lambda: float(os.getenv("RDB_UNITREE_CONTROL_WATCHDOG_SECONDS", "0.25"))
+    )
+    unitree_zero_frame_count: int = field(
+        default_factory=lambda: int(os.getenv("RDB_UNITREE_ZERO_FRAME_COUNT", "5"))
+    )
+    unitree_state_max_age_seconds: float = field(
+        default_factory=lambda: float(os.getenv("RDB_UNITREE_STATE_MAX_AGE_SECONDS", "2.0"))
+    )
+    unitree_post_drive_stop_timeout: float = field(
+        default_factory=lambda: float(os.getenv("RDB_UNITREE_POST_DRIVE_STOP_TIMEOUT", "3.0"))
+    )
+    unitree_webrtc_connect_timeout: float = field(
+        default_factory=lambda: float(os.getenv("RDB_UNITREE_WEBRTC_CONNECT_TIMEOUT", "30.0"))
+    )
+    # MCF firmware: omni vx/vy/vyaw via sport Move(1008); joystick alone often only drives ly.
+    unitree_webrtc_drive_via_move: bool = field(
+        default_factory=lambda: os.getenv("RDB_UNITREE_WEBRTC_DRIVE_VIA_MOVE", "true").lower()
+        in ("1", "true", "yes")
     )
 
 

@@ -1,9 +1,11 @@
 """Unitree robot adapter implementing RobotInterface with safety clamps."""
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -25,6 +27,8 @@ class UnitreeState(BaseModel):
     is_standing: bool = False
     is_moving: bool = False
     error_code: int = 0
+    # Go2 SportModeState.mode when available (WebRTC / SDK).
+    sport_mode: int | None = None
 
 
 class UnitreeCommand(BaseModel):
@@ -111,7 +115,15 @@ class UnitreeRobot(RobotInterface):
 
     # Non-translating posture commands supported by live transports.
     ALLOWED_POSTURES = frozenset(
-        {"balance_stand", "stand_up", "stand_down", "recovery_stand", "damp", "sit"}
+        {
+            "balance_stand",
+            "stand_up",
+            "stand_down",
+            "recovery_stand",
+            "damp",
+            "sit",
+            "free_walk",
+        }
     )
 
     def __init__(self, transport: UnitreeTransport, settings: Settings) -> None:
@@ -155,6 +167,19 @@ class UnitreeRobot(RobotInterface):
             )
         except Exception as exc:
             logger.error("Stop command failed (best-effort): %s", exc)
+
+    async def release_drive(self, reason: str = "") -> None:
+        """Zero joystick output without StopMove (DimOS-style teleop release)."""
+        self._record("release_drive", reason=reason)
+        if self.dry_run:
+            logger.info("[DRY-RUN] release_drive: %s", reason)
+            return
+        try:
+            await self._transport.send_command(
+                UnitreeCommand(action="release", parameters={"reason": reason})
+            )
+        except Exception as exc:
+            logger.warning("release_drive failed (best-effort): %s", exc)
 
     async def move_to(self, target: Position, speed: float) -> None:
         clamped_speed = min(speed, self._settings.unitree_max_speed, self._settings.max_linear_speed)
@@ -239,12 +264,69 @@ class UnitreeRobot(RobotInterface):
             await self.stop(f"set_posture exception: {exc}")
             raise RuntimeError(f"Unitree set_posture failed: {exc}") from exc
 
+    async def enable_omni_teleop(self) -> None:
+        """Enable SwitchJoystick + low SpeedLevel after FreeWalk (WebRTC MCF)."""
+        self._record("enable_omni_teleop")
+        if self.dry_run:
+            logger.info("[DRY-RUN] enable_omni_teleop")
+            return
+        if hasattr(self._transport, "enable_omni_teleop"):
+            await self._transport.enable_omni_teleop()
+
+    async def stream_hold(
+        self,
+        get_velocity: Callable[[], tuple[float, float, float]],
+        *,
+        session_deadline: float,
+    ) -> None:
+        """Continuous hold teleop — one 50Hz stream, no per-tick zero frames."""
+        max_lin = min(self._settings.unitree_max_speed, self._settings.max_linear_speed)
+        max_yaw = self._settings.unitree_max_yaw_speed
+
+        def clamped() -> tuple[float, float, float]:
+            vx, vy, vyaw = get_velocity()
+            return (
+                max(-max_lin, min(max_lin, vx)),
+                max(-max_lin, min(max_lin, vy)),
+                max(-max_yaw, min(max_yaw, vyaw)),
+            )
+
+        self._record("stream_hold", session_deadline=session_deadline)
+        self._stopped = False
+
+        if self.dry_run:
+            while time.time() < session_deadline:
+                vx, vy, vyaw = clamped()
+                if not (vx or vy or vyaw):
+                    await asyncio.sleep(0.05)
+                    continue
+                logger.info(
+                    "[DRY-RUN] stream_hold vx=%.2f vy=%.2f vyaw=%.2f",
+                    vx, vy, vyaw,
+                )
+                await asyncio.sleep(0.02)
+            return
+
+        if not hasattr(self._transport, "stream_hold"):
+            raise NotImplementedError(
+                f"{type(self._transport).__name__} has no stream_hold"
+            )
+        if hasattr(self._transport, "assert_drive_preconditions"):
+            await self._transport.assert_drive_preconditions(self._settings)
+        await self._transport.stream_hold(
+            clamped,
+            session_deadline=session_deadline,
+            zero_on_exit=False,
+        )
+
     async def drive(
         self,
         vx: float = 0.0,
         vy: float = 0.0,
         vyaw: float = 0.0,
         duration: float = 0.5,
+        *,
+        stream: bool = False,
     ) -> None:
         """Velocity teleop over the joystick channel (Unitree-specific).
 
@@ -253,6 +335,9 @@ class UnitreeRobot(RobotInterface):
         ``duration`` seconds, then auto-stops. All inputs are clamped to the
         configured safety limits. Honors dry-run; on failure issues a
         best-effort stop and re-raises.
+
+        When ``stream=True`` (continuous web teleop chunks), skip the
+        post-drive stopped verification so the UI loop is not blocked.
         """
         max_lin = min(self._settings.unitree_max_speed, self._settings.max_linear_speed)
         max_yaw = self._settings.unitree_max_yaw_speed
@@ -263,9 +348,20 @@ class UnitreeRobot(RobotInterface):
         cvyaw = max(-max_yaw, min(max_yaw, vyaw))
         cdur = max(0.0, min(max_dur, duration))
 
+        pre_state: dict[str, Any] | None = None
+        if not self.dry_run and hasattr(self._transport, "assert_drive_preconditions"):
+            raw_pre = await self._transport.assert_drive_preconditions(self._settings)
+            pre_state = raw_pre.model_dump(mode="json")
+
+        started = time.time()
         self._record(
-            "drive", vx=cvx, vy=cvy, vyaw=cvyaw, duration=cdur,
+            "drive",
+            vx=cvx,
+            vy=cvy,
+            vyaw=cvyaw,
+            duration=cdur,
             original={"vx": vx, "vy": vy, "vyaw": vyaw, "duration": duration},
+            pre_state=pre_state,
         )
         self._stopped = False
 
@@ -274,8 +370,14 @@ class UnitreeRobot(RobotInterface):
                 "[DRY-RUN] drive vx=%.2f vy=%.2f vyaw=%.2f dur=%.2fs",
                 cvx, cvy, cvyaw, cdur,
             )
+            self._patch_last_history(
+                end_reason="dry_run",
+                elapsed=time.time() - started,
+                success=True,
+            )
             return
 
+        end_reason: str | None = None
         try:
             await self._transport.send_command(
                 UnitreeCommand(
@@ -283,10 +385,58 @@ class UnitreeRobot(RobotInterface):
                     parameters={"vx": cvx, "vy": cvy, "vyaw": cvyaw, "duration": cdur},
                 )
             )
+            last = getattr(self._transport, "last_drive_end_reason", None)
+            end_reason = str(last) if last is not None else "completed"
         except Exception as exc:
             logger.error("drive failed, issuing best-effort stop: %s", exc)
+            end_reason = "transport_error"
             await self.stop(f"drive exception: {exc}")
+            self._patch_last_history(
+                end_reason=end_reason,
+                elapsed=time.time() - started,
+                success=False,
+            )
             raise RuntimeError(f"Unitree drive failed: {exc}") from exc
+
+        post_state: dict[str, Any] | None = None
+        stopped_ok = True
+        if (
+            not stream
+            and hasattr(self._transport, "verify_stopped_after_drive")
+        ):
+            stopped_ok = await self._transport.verify_stopped_after_drive(self._settings)
+            try:
+                raw_post = await self._transport.read_state()
+                post_state = raw_post.model_dump(mode="json")
+            except Exception as exc:
+                logger.warning("post-drive state read failed: %s", exc)
+
+        if not stopped_ok:
+            end_reason = "post_drive_still_moving"
+            await self.stop("post-drive still moving")
+            self._patch_last_history(
+                end_reason=end_reason,
+                elapsed=time.time() - started,
+                post_state=post_state,
+                success=False,
+            )
+            raise RuntimeError(
+                "Unitree drive finished but robot still reports motion; issued stop"
+            )
+
+        self._patch_last_history(
+            end_reason=end_reason,
+            elapsed=time.time() - started,
+            post_state=post_state,
+            success=True,
+        )
+
+    def _patch_last_history(self, **fields: Any) -> None:
+        if not self._action_history:
+            return
+        if self._action_history[-1].get("action") != "drive":
+            return
+        self._action_history[-1].update(fields)
 
     async def dock(self, station: str) -> None:
         self._record("dock", station=station, supported=False)

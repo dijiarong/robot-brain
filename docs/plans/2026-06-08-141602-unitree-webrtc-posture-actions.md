@@ -125,5 +125,5 @@ RDB_UNITREE_ENABLE_MOTION=true python -m examples.run_unitree_smoke \
 
 ## 遗留
 
-- 真机姿态序列需在安全环境手动执行验证
-- 下一步（第九次迭代）：低速短步平移 —— 把 Move(1008) 的速度语义接入，配合时长/限速/限步与急停闭环
+- 真机姿态序列需在安全环境手动执行验证（第八次迭代已具备 WebRTC 姿态能力）
+- ~~下一步（第九次迭代）：低速短步平移~~ → 已在 [第九次迭代](./2026-06-11-172047-unitree-live-control-loop.md) 完成；后续见该文档「下一步」

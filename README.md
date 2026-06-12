@@ -57,6 +57,41 @@ python examples\run_scheduler_demo.py
 python examples\run_service.py
 ```
 
+### Unitree Go2（WebRTC 实机操控）
+
+项目已支持通过 WebRTC（LocalSTA / 同 LAN）连接宇树 Go2，完成姿态、急停和低速限时速度操控。**默认仍为 mock/fake，不会连接真机或下发动作。**
+
+依赖（可选）：
+
+```bash
+pip install -e ".[unitree]"   # unitree-webrtc-connect 等
+```
+
+常用环境变量见 [`docs/unitree-setup.md`](./docs/unitree-setup.md)。最小实机配置：
+
+```bash
+export RDB_UNITREE_ROBOT_IP=10.10.x.x    # 或 DIMOS_ROBOT_IP / ROBOT_IP
+export RDB_UNITREE_ENABLE_MOTION=true    # 硬安全门，默认 false
+# 新固件可能还需要：export UNITREE_AES_128_KEY=<32-hex>
+```
+
+操作者入口（**不接入 LLM / 服务 API**）：
+
+| 脚本 | 用途 |
+| --- | --- |
+| `examples/run_unitree_smoke.py` | 只读 / 姿态 / 短时 drive / 分级验收（Level 0–5） |
+| `examples/run_unitree_teleop.py` | 终端离散 nudge + 急停 |
+| `examples/run_unitree_teleop_web.py` | 浏览器按住操控（车式键位：W/S 前后，A/D 转弯，Q/E 平移） |
+
+Web 面板示例（真机会移动，需确认短语）：
+
+```bash
+RDB_UNITREE_ENABLE_MOTION=true python -m examples.run_unitree_teleop_web \
+    --transport webrtc --live --strong
+```
+
+安全要点：`RDB_UNITREE_DRY_RUN=true`（默认）、`RDB_UNITREE_ENABLE_MOTION=false`（默认）；真实平移需同时 `--live` 与 motion gate。MCF 固件上前进/侧移走 Move(1008)，含转向（含 W+D 弧线）走虚拟摇杆通道，详见第九次迭代文档。
+
 ## API
 
 | Method | Path | Description |
@@ -127,8 +162,12 @@ $env:RDB_MEMORY_DB = "D:\robot-data\robot_brain.sqlite3"
 | `RDB_MEMORY_DB` | `data/robot_brain.sqlite3` | SQLite 路径 |
 | `RDB_VERBOSE` | `true` | 是否启用详细日志 |
 | `RDB_OPENAI_MODEL` | `gpt-4o-mini` | 可选 OpenAI 适配器模型 |
+| `RDB_UNITREE_TRANSPORT` | `fake` | Unitree 传输层：`fake` / `sdk` / `webrtc` |
+| `RDB_UNITREE_ROBOT_IP` | 空 | Go2 WebRTC LAN IP（亦读 `DIMOS_ROBOT_IP` / `ROBOT_IP`） |
+| `RDB_UNITREE_DRY_RUN` | `true` | `false` 才允许向真机下发（仍受 motion gate 约束） |
+| `RDB_UNITREE_ENABLE_MOTION` | `false` | 真实姿态/平移硬安全门；`stop` 在已连接时始终允许 |
 
-## 测试
+更多 Unitree 变量（限速、watchdog、Move/摇杆策略等）见 [`docs/unitree-setup.md`](./docs/unitree-setup.md) 与 `config/settings.py`。
 
 项目测试基于标准库 `unittest`，无需额外测试框架即可运行：
 
@@ -150,13 +189,19 @@ robot_brain/
   orchestration/    LangGraph 决策循环
   runtime/          单次 runtime 与持久化 scheduler
   service/          后台服务、HTTP API、WebSocket 与状态页面
+  actuation/        机器人适配层（含 Unitree Go2 WebRTC / SDK）
+examples/
+  run_unitree_*.py  Go2 操作者 smoke / teleop（不接入 Agent）
+docs/
+  unitree-setup.md  Go2 连接、环境变量与实机验收
+  plans/            架构与迭代记录
 ```
 
 ## 当前边界
 
 - 默认服务仅监听 `127.0.0.1:8000`，适用于本机可信环境。
 - 尚未加入身份认证、HTTPS、schema migration 和数据清理策略。
-- 真机 SDK、ROS2 和真实传感器适配器仍需根据硬件型号实现。
+- Unitree Go2 已支持 WebRTC 低速操控与操作者 teleop，但**未**接入主服务 API、LLM 技能或自主导航；SDK transport 仍为只读。
 - 当前急停入口可以立即触发，但无法强制中断阻塞中的厂商 SDK 调用。
 
 更详细的架构与迭代记录见 [`docs/plans/`](./docs/plans/README.md)。

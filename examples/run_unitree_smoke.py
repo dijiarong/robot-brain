@@ -12,13 +12,18 @@ Usage:
     # Real velocity teleop nudges on Go2 (joystick channel, the robot WILL move):
     RDB_UNITREE_ENABLE_MOTION=true python -m examples.run_unitree_smoke \\
         --transport webrtc --drive --live
+    # Graded live acceptance (webrtc, levels 0-5):
+    RDB_UNITREE_ENABLE_MOTION=true python -m examples.run_unitree_smoke \\
+        --transport webrtc --graded --live --level 0
 """
 from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import logging
 import sys
+import time
 
 from config.settings import Settings
 from robot_brain.actuation.unitree import (
@@ -216,6 +221,121 @@ async def run_drive_sequence(robot: UnitreeRobot) -> None:
     print("\n[OK] Drive demo complete.")
 
 
+GRADED_CONFIRMATION = "I_UNDERSTAND_UNITREE_GRADED_ACCEPTANCE"
+
+
+class AcceptanceSummary:
+    """Collect graded acceptance results for optional export."""
+
+    def __init__(self) -> None:
+        self.levels: list[dict[str, object]] = []
+
+    def record(self, level: int, name: str, passed: bool, detail: str = "") -> None:
+        self.levels.append(
+            {"level": level, "name": name, "passed": passed, "detail": detail}
+        )
+        status = "PASS" if passed else "FAIL"
+        print(f"\n[Level {level}] {name}: {status}")
+        if detail:
+            print(f"  {detail}")
+
+    def print_summary(self) -> None:
+        print("\n" + "=" * 50)
+        print("  Graded Acceptance Summary")
+        print("=" * 50)
+        for row in self.levels:
+            mark = "OK" if row["passed"] else "FAIL"
+            print(f"  L{row['level']} {row['name']}: {mark}")
+        print()
+
+
+async def run_graded_level(level: int, robot: UnitreeRobot, summary: AcceptanceSummary) -> bool:
+    """Run a single acceptance level. Returns False on failure (stops progression)."""
+    if level == 0:
+        print("[Level 0] Read-only stability (60s polling)...")
+        start = time.time()
+        reads = 0
+        while time.time() - start < 60.0:
+            state = await robot.get_state()
+            reads += 1
+            await asyncio.sleep(2.0)
+        summary.record(0, "read-only 60s", True, f"{reads} state reads")
+        return True
+
+    if level == 1:
+        print("[Level 1] Stop-only (repeat 3x)...")
+        for i in range(3):
+            await robot.stop(f"graded L1 stop {i + 1}")
+            await asyncio.sleep(0.5)
+        summary.record(1, "stop-only", True, "3x stop issued")
+        return True
+
+    if level == 2:
+        print("[Level 2] Posture sequence + omni teleop enable...")
+        for posture in ("stand_up", "balance_stand", "free_walk"):
+            await robot.set_posture(posture)
+            await asyncio.sleep(2.0)
+        await robot.enable_omni_teleop()
+        await asyncio.sleep(1.0)
+        summary.record(2, "posture", True, "stand_up + balance_stand + free_walk + SwitchJoystick")
+        return True
+
+    if level == 3:
+        print("[Level 3] In-place yaw nudges...")
+        await robot.drive(vyaw=0.3, duration=0.5)
+        await asyncio.sleep(1.0)
+        await robot.drive(vyaw=-0.3, duration=0.5)
+        summary.record(3, "yaw nudge", True, "±0.3 rad/s × 0.5s")
+        return True
+
+    if level == 4:
+        print("[Level 4] Forward/back nudges...")
+        await robot.drive(vx=0.2, duration=0.5)
+        await asyncio.sleep(1.0)
+        await robot.drive(vx=-0.2, duration=0.5)
+        summary.record(4, "linear nudge", True, "±0.2 m/s × 0.5s")
+        return True
+
+    if level == 5:
+        print("[Level 5] Stop during motion...")
+        task = asyncio.create_task(robot.drive(vx=0.2, duration=1.0))
+        await asyncio.sleep(0.2)
+        await robot.stop("graded L5 preempt")
+        await task
+        summary.record(5, "stop preempt", True, "stop during active drive")
+        return True
+
+    print(f"[ERROR] Unknown level {level}")
+    return False
+
+
+async def run_graded_acceptance(robot: UnitreeRobot, max_level: int) -> None:
+    summary = AcceptanceSummary()
+    print("[Phase] Graded live acceptance (webrtc)")
+    print(f"  Levels 0..{max_level}")
+    print()
+
+    confirmation = input(f"Type '{GRADED_CONFIRMATION}' to proceed: ").strip()
+    if confirmation != GRADED_CONFIRMATION:
+        print("[ABORT] Confirmation not received.")
+        sys.exit(1)
+
+    for level in range(max_level + 1):
+        try:
+            ok = await run_graded_level(level, robot, summary)
+        except Exception as exc:
+            summary.record(level, f"level-{level}", False, str(exc))
+            print(f"\n[HALT] Level {level} failed: {exc}")
+            break
+        if not ok:
+            break
+    else:
+        print("\n[OK] All requested levels passed.")
+
+    summary.print_summary()
+    print(json.dumps(summary.levels, indent=2))
+
+
 async def create_transport(transport_type: str, settings: Settings):
     """Create and connect the appropriate transport."""
     if transport_type == "sdk":
@@ -265,7 +385,27 @@ async def main() -> None:
         "--transport", choices=["fake", "sdk", "webrtc"], default="fake",
         help="Transport to use: fake (default), sdk (DDS direct), or webrtc (LAN/STA mode)",
     )
+    parser.add_argument(
+        "--graded", action="store_true",
+        help="Run graded live acceptance levels (webrtc + live + motion gate)",
+    )
+    parser.add_argument(
+        "--level", type=int, default=5,
+        help="Highest graded level to run (0-5, default 5)",
+    )
     args = parser.parse_args()
+
+    if args.graded:
+        args.state_only = False
+        if args.transport != "webrtc":
+            print("[ERROR] --graded requires --transport webrtc")
+            sys.exit(1)
+        if not args.live:
+            print("[ERROR] --graded requires --live")
+            sys.exit(1)
+        if args.level < 0 or args.level > 5:
+            print("[ERROR] --level must be 0-5")
+            sys.exit(1)
 
     # Safety: sdk transport is still read-only in this iteration.
     if args.transport == "sdk" and (args.actions or args.live):
@@ -293,9 +433,9 @@ async def main() -> None:
         unitree_dry_run=not args.live,
     )
 
-    if args.transport == "webrtc" and (args.actions or args.drive) and not settings.unitree_enable_motion:
-        kind = "posture sequence" if args.actions else "drive demo"
-        flag = "--actions" if args.actions else "--drive"
+    if args.transport == "webrtc" and (args.actions or args.drive or args.graded) and not settings.unitree_enable_motion:
+        kind = "posture sequence" if args.actions else "drive demo" if args.drive else "graded acceptance"
+        flag = "--actions" if args.actions else "--drive" if args.drive else "--graded"
         print(f"[ERROR] webrtc {kind} requires RDB_UNITREE_ENABLE_MOTION=true.")
         print("        This is a hard safety gate for real motion. Export it explicitly:")
         print(f"        RDB_UNITREE_ENABLE_MOTION=true ... --transport webrtc {flag} --live")
@@ -337,7 +477,9 @@ async def main() -> None:
     robot = UnitreeRobot(transport, settings)
 
     try:
-        if args.drive:
+        if args.graded:
+            await run_graded_acceptance(robot, args.level)
+        elif args.drive:
             await run_drive_sequence(robot)
         elif args.actions:
             if args.transport == "webrtc":
@@ -355,7 +497,7 @@ async def main() -> None:
         sys.exit(1)
     finally:
         # Leave the robot stopped after any action run (StopMove is always allowed).
-        if args.actions or args.drive:
+        if args.actions or args.drive or args.graded:
             await robot.stop("smoke test: shutdown")
         await transport.disconnect()
 
