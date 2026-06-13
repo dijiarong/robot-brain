@@ -413,13 +413,13 @@ class UnitreeRobot(RobotInterface):
 
         if not stopped_ok:
             end_reason = "post_drive_still_moving"
-            await self.stop("post-drive still moving")
             self._patch_last_history(
                 end_reason=end_reason,
                 elapsed=time.time() - started,
                 post_state=post_state,
                 success=False,
             )
+            await self.stop("post-drive still moving")
             raise RuntimeError(
                 "Unitree drive finished but robot still reports motion; issued stop"
             )

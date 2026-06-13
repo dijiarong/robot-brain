@@ -229,15 +229,44 @@ class AcceptanceSummary:
 
     def __init__(self) -> None:
         self.levels: list[dict[str, object]] = []
+        self.started_at: float = time.time()
 
-    def record(self, level: int, name: str, passed: bool, detail: str = "") -> None:
+    def record(
+        self,
+        level: int,
+        name: str,
+        passed: bool,
+        detail: str = "",
+        *,
+        pre_state: dict[str, object] | None = None,
+        post_state: dict[str, object] | None = None,
+        audit: list[dict[str, object]] | None = None,
+    ) -> None:
         self.levels.append(
-            {"level": level, "name": name, "passed": passed, "detail": detail}
+            {
+                "level": level,
+                "name": name,
+                "passed": passed,
+                "detail": detail,
+                "timestamp": time.time(),
+                "pre_state": pre_state,
+                "post_state": post_state,
+                "audit": audit or [],
+            }
         )
         status = "PASS" if passed else "FAIL"
         print(f"\n[Level {level}] {name}: {status}")
         if detail:
             print(f"  {detail}")
+
+    def to_dict(self) -> dict[str, object]:
+        passed = all(row["passed"] for row in self.levels) if self.levels else False
+        return {
+            "started_at": self.started_at,
+            "finished_at": time.time(),
+            "passed": passed,
+            "levels": self.levels,
+        }
 
     def print_summary(self) -> None:
         print("\n" + "=" * 50)
@@ -249,17 +278,48 @@ class AcceptanceSummary:
         print()
 
 
-async def run_graded_level(level: int, robot: UnitreeRobot, summary: AcceptanceSummary) -> bool:
+async def _robot_state_snapshot(robot: UnitreeRobot) -> dict[str, object]:
+    state = await robot.get_state()
+    return state.model_dump(mode="json")
+
+
+def _audit_since(robot: UnitreeRobot, since: float) -> list[dict[str, object]]:
+    return [
+        {k: v for k, v in entry.items()}
+        for entry in robot.action_history
+        if entry.get("timestamp", 0) >= since
+    ]
+
+
+async def run_graded_level(
+    level: int,
+    robot: UnitreeRobot,
+    summary: AcceptanceSummary,
+    *,
+    level0_seconds: float = 60.0,
+) -> bool:
     """Run a single acceptance level. Returns False on failure (stops progression)."""
+    level_start = time.time()
+    pre_state = await _robot_state_snapshot(robot)
+
     if level == 0:
-        print("[Level 0] Read-only stability (60s polling)...")
+        print(f"[Level 0] Read-only stability ({level0_seconds:.0f}s polling)...")
         start = time.time()
         reads = 0
-        while time.time() - start < 60.0:
+        while time.time() - start < level0_seconds:
             state = await robot.get_state()
             reads += 1
             await asyncio.sleep(2.0)
-        summary.record(0, "read-only 60s", True, f"{reads} state reads")
+        post_state = state.model_dump(mode="json")
+        summary.record(
+            0,
+            "read-only 60s",
+            True,
+            f"{reads} state reads",
+            pre_state=pre_state,
+            post_state=post_state,
+            audit=_audit_since(robot, level_start),
+        )
         return True
 
     if level == 1:
@@ -267,7 +327,15 @@ async def run_graded_level(level: int, robot: UnitreeRobot, summary: AcceptanceS
         for i in range(3):
             await robot.stop(f"graded L1 stop {i + 1}")
             await asyncio.sleep(0.5)
-        summary.record(1, "stop-only", True, "3x stop issued")
+        summary.record(
+            1,
+            "stop-only",
+            True,
+            "3x stop issued",
+            pre_state=pre_state,
+            post_state=await _robot_state_snapshot(robot),
+            audit=_audit_since(robot, level_start),
+        )
         return True
 
     if level == 2:
@@ -277,7 +345,15 @@ async def run_graded_level(level: int, robot: UnitreeRobot, summary: AcceptanceS
             await asyncio.sleep(2.0)
         await robot.enable_omni_teleop()
         await asyncio.sleep(1.0)
-        summary.record(2, "posture", True, "stand_up + balance_stand + free_walk + SwitchJoystick")
+        summary.record(
+            2,
+            "posture",
+            True,
+            "stand_up + balance_stand + free_walk + SwitchJoystick",
+            pre_state=pre_state,
+            post_state=await _robot_state_snapshot(robot),
+            audit=_audit_since(robot, level_start),
+        )
         return True
 
     if level == 3:
@@ -285,7 +361,15 @@ async def run_graded_level(level: int, robot: UnitreeRobot, summary: AcceptanceS
         await robot.drive(vyaw=0.3, duration=0.5)
         await asyncio.sleep(1.0)
         await robot.drive(vyaw=-0.3, duration=0.5)
-        summary.record(3, "yaw nudge", True, "±0.3 rad/s × 0.5s")
+        summary.record(
+            3,
+            "yaw nudge",
+            True,
+            "±0.3 rad/s × 0.5s",
+            pre_state=pre_state,
+            post_state=await _robot_state_snapshot(robot),
+            audit=_audit_since(robot, level_start),
+        )
         return True
 
     if level == 4:
@@ -293,7 +377,15 @@ async def run_graded_level(level: int, robot: UnitreeRobot, summary: AcceptanceS
         await robot.drive(vx=0.2, duration=0.5)
         await asyncio.sleep(1.0)
         await robot.drive(vx=-0.2, duration=0.5)
-        summary.record(4, "linear nudge", True, "±0.2 m/s × 0.5s")
+        summary.record(
+            4,
+            "linear nudge",
+            True,
+            "±0.2 m/s × 0.5s",
+            pre_state=pre_state,
+            post_state=await _robot_state_snapshot(robot),
+            audit=_audit_since(robot, level_start),
+        )
         return True
 
     if level == 5:
@@ -302,14 +394,28 @@ async def run_graded_level(level: int, robot: UnitreeRobot, summary: AcceptanceS
         await asyncio.sleep(0.2)
         await robot.stop("graded L5 preempt")
         await task
-        summary.record(5, "stop preempt", True, "stop during active drive")
+        summary.record(
+            5,
+            "stop preempt",
+            True,
+            "stop during active drive",
+            pre_state=pre_state,
+            post_state=await _robot_state_snapshot(robot),
+            audit=_audit_since(robot, level_start),
+        )
         return True
 
     print(f"[ERROR] Unknown level {level}")
     return False
 
 
-async def run_graded_acceptance(robot: UnitreeRobot, max_level: int) -> None:
+async def run_graded_acceptance(
+    robot: UnitreeRobot,
+    max_level: int,
+    *,
+    level0_seconds: float = 60.0,
+    output_json: str | None = None,
+) -> None:
     summary = AcceptanceSummary()
     print("[Phase] Graded live acceptance (webrtc)")
     print(f"  Levels 0..{max_level}")
@@ -322,9 +428,18 @@ async def run_graded_acceptance(robot: UnitreeRobot, max_level: int) -> None:
 
     for level in range(max_level + 1):
         try:
-            ok = await run_graded_level(level, robot, summary)
+            ok = await run_graded_level(
+                level, robot, summary, level0_seconds=level0_seconds
+            )
         except Exception as exc:
-            summary.record(level, f"level-{level}", False, str(exc))
+            summary.record(
+                level,
+                f"level-{level}",
+                False,
+                str(exc),
+                post_state=await _robot_state_snapshot(robot),
+                audit=_audit_since(robot, summary.started_at),
+            )
             print(f"\n[HALT] Level {level} failed: {exc}")
             break
         if not ok:
@@ -333,7 +448,12 @@ async def run_graded_acceptance(robot: UnitreeRobot, max_level: int) -> None:
         print("\n[OK] All requested levels passed.")
 
     summary.print_summary()
-    print(json.dumps(summary.levels, indent=2))
+    payload = summary.to_dict()
+    print(json.dumps(payload, indent=2))
+    if output_json:
+        with open(output_json, "w", encoding="utf-8") as fh:
+            json.dump(payload, fh, indent=2)
+        print(f"\n[Saved] Graded summary written to {output_json}")
 
 
 async def create_transport(transport_type: str, settings: Settings):
@@ -392,6 +512,15 @@ async def main() -> None:
     parser.add_argument(
         "--level", type=int, default=5,
         help="Highest graded level to run (0-5, default 5)",
+    )
+    parser.add_argument(
+        "--level0-seconds", type=float, default=60.0,
+        help="Level 0 read-only polling duration (default 60)",
+    )
+    parser.add_argument(
+        "--output-json",
+        metavar="PATH",
+        help="Write graded acceptance summary JSON to PATH",
     )
     args = parser.parse_args()
 
@@ -478,7 +607,12 @@ async def main() -> None:
 
     try:
         if args.graded:
-            await run_graded_acceptance(robot, args.level)
+            await run_graded_acceptance(
+                robot,
+                args.level,
+                level0_seconds=args.level0_seconds,
+                output_json=args.output_json,
+            )
         elif args.drive:
             await run_drive_sequence(robot)
         elif args.actions:

@@ -9,7 +9,7 @@ import asyncio
 import json
 import time
 import unittest
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from config.settings import Settings
 from robot_brain.actuation.unitree import UnitreeCommand, UnitreeRobot, UnitreeState
@@ -419,6 +419,119 @@ class MotionLeaseTests(unittest.IsolatedAsyncioTestCase):
         state = await self.transport.read_state()
         self.assertEqual(1, state.sport_mode)
         self.assertEqual(0, state.error_code)
+
+    async def test_watchdog_stops_stream_and_zeros(self) -> None:
+        transport, conn = connected_transport(
+            unitree_enable_motion=True,
+            unitree_control_watchdog_seconds=0.05,
+            unitree_zero_frame_count=2,
+            unitree_webrtc_drive_via_move=False,
+        )
+        await transport.connect()
+        joy = conn.datachannel.pub_sub.publish_without_callback
+
+        real_sleep = asyncio.sleep
+        sleep_calls = 0
+
+        async def slow_first_period(delay: float) -> None:
+            nonlocal sleep_calls
+            sleep_calls += 1
+            if sleep_calls == 1:
+                await real_sleep(0.12)
+            else:
+                await real_sleep(delay)
+
+        with patch(
+            "robot_brain.actuation.unitree_webrtc.asyncio.sleep",
+            side_effect=slow_first_period,
+        ):
+            await transport.send_command(
+                UnitreeCommand(action="drive", parameters={"vx": 0.2, "duration": 2.0})
+            )
+
+        self.assertEqual(
+            transport.last_drive_end_reason,
+            MotionEndReason.WATCHDOG,
+        )
+        for call in joy.call_args_list[-2:]:
+            self.assertEqual(call.kwargs["data"], _ZERO_STICK)
+
+    async def test_drive_cancel_sends_zeros(self) -> None:
+        task = asyncio.create_task(
+            self.transport.send_command(
+                UnitreeCommand(action="drive", parameters={"vx": 0.2, "duration": 5.0})
+            )
+        )
+        await asyncio.sleep(0.05)
+        task.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await task
+        self.assertEqual(
+            self.transport.last_drive_end_reason,
+            MotionEndReason.CANCELLED,
+        )
+        for call in self.joy.call_args_list[-3:]:
+            self.assertEqual(call.kwargs["data"], _ZERO_STICK)
+
+    async def test_publish_error_sends_zeros(self) -> None:
+        def fail_nonzero(*args: object, **kwargs: object) -> None:
+            data = kwargs.get("data")
+            if data != _ZERO_STICK:
+                raise RuntimeError("channel closed")
+
+        self.joy.side_effect = fail_nonzero
+        with self.assertRaises(RuntimeError):
+            await self.transport.send_command(
+                UnitreeCommand(action="drive", parameters={"vx": 0.2, "duration": 1.0})
+            )
+        self.assertEqual(
+            self.transport.last_drive_end_reason,
+            MotionEndReason.TRANSPORT_ERROR,
+        )
+        for call in self.joy.call_args_list[-3:]:
+            self.assertEqual(call.kwargs["data"], _ZERO_STICK)
+
+    async def test_disconnect_during_drive_halts_and_zeros(self) -> None:
+        task = asyncio.create_task(
+            self.transport.send_command(
+                UnitreeCommand(action="drive", parameters={"vx": 0.2, "duration": 5.0})
+            )
+        )
+        await asyncio.sleep(0.05)
+        await self.transport.disconnect()
+        await task
+        self.assertIn(
+            self.transport.last_drive_end_reason,
+            (MotionEndReason.DISCONNECT, MotionEndReason.PREEMPTED),
+        )
+        self.assertFalse(self.transport.is_connected)
+        for call in self.joy.call_args_list[-3:]:
+            self.assertEqual(call.kwargs["data"], _ZERO_STICK)
+
+    async def test_post_drive_still_moving_upgrades_stop(self) -> None:
+        self.transport._on_sport_state(
+            {
+                "mode": 1,
+                "error_code": 0,
+                "velocity": [0.5, 0.0, 0.0],
+                "position": [0.0, 0.0, 0.0],
+                "imu_state": {"rpy": [0.0, 0.0, 0.0]},
+            }
+        )
+        settings = make_settings(unitree_enable_motion=True, unitree_dry_run=False)
+        robot = UnitreeRobot(self.transport, settings)
+        with self.assertRaises(RuntimeError) as ctx:
+            await robot.drive(vx=0.1, duration=0.0)
+        self.assertIn("still reports motion", str(ctx.exception))
+        entry = next(a for a in robot.action_history if a["action"] == "drive")
+        self.assertFalse(entry.get("success"))
+        self.assertEqual(entry.get("end_reason"), "post_drive_still_moving")
+        pub = self.conn.datachannel.pub_sub.publish_request_new
+        stop_calls = [
+            c for c in pub.await_args_list
+            if c.args and c.args[1].get("api_id") == _SPORT_API_ID["stop"]
+        ]
+        self.assertGreaterEqual(len(stop_calls), 1)
 
 
 class SportStateParsingTests(unittest.TestCase):

@@ -90,6 +90,16 @@ RDB_UNITREE_ENABLE_MOTION=true python -m examples.run_unitree_teleop_web \
     --transport webrtc --live --strong
 ```
 
+分级真机验收（Level 0–5 逐级：只读 → 急停 → 姿态 → 旋转 → 直线 → 运动中急停）。每级记录前后状态与动作审计，可用 `--output-json` 导出完整摘要：
+
+```bash
+RDB_UNITREE_ENABLE_MOTION=true python -m examples.run_unitree_smoke \
+    --transport webrtc --graded --live --level 5 \
+    --output-json acceptance.json
+```
+
+调试时可缩短 Level 0 只读观察时长，例如 `--level0-seconds 10`（正式验收默认 60 秒）。任一级失败会立即停止，不会进入下一级。
+
 安全要点：`RDB_UNITREE_DRY_RUN=true`（默认）、`RDB_UNITREE_ENABLE_MOTION=false`（默认）；真实平移需同时 `--live` 与 motion gate。MCF 固件上前进/侧移走 Move(1008)，含转向（含 W+D 弧线）走虚拟摇杆通道，详见第九次迭代文档。
 
 ## API

@@ -193,7 +193,7 @@ Prep 序列（实机 teleop 自动执行）：`stand_up → balance_stand → fr
 验收：
 
 - [x] stale state、未站立、错误码非零时拒绝真实动作
-- [ ] watchdog 到期自动归零（逻辑已实现，专用单测待补）
+- [x] watchdog 到期自动归零（专用单测已补）
 - [x] 动作后仍移动时执行升级停止并返回失败
 
 ### 阶段 C：操作者遥控与自动化测试
@@ -221,7 +221,7 @@ Prep 序列（实机 teleop 自动执行）：`stand_up → balance_stand → fr
 
 验收：
 
-- [ ] 每一级均有前后状态和动作审计记录（分级脚本已支持 JSON 摘要）
+- [x] 每一级均有前后状态和动作审计记录（分级脚本支持 JSON 摘要 + `--output-json`）
 - [ ] 任一级失败后系统停止，且不会自动进入下一级
 - [x] 操作者能够使用 Web 面板 + STOP 完成低速 teleop（2026-06-11 实机确认）
 
@@ -267,10 +267,11 @@ Prep 序列（实机 teleop 自动执行）：`stand_up → balance_stand → fr
 ## 验证方式
 
 - [x] `python -m compileall -q robot_brain config tests examples`
-- [x] `python -m pytest`（183 passed，含 webrtc / teleop 单测）
+- [x] `python -m pytest`（188 passed，含 watchdog / 取消 / 异常 / 断连单测）
 - [x] fake connection：正常结束后归零
 - [x] fake connection：新 `drive` 抢占旧 `drive`
 - [x] fake connection：stop 抢占活动 `drive`
+- [x] fake connection：watchdog 到期自动归零
 - [x] fake connection：任务取消、发布异常、disconnect 后归零
 - [x] fake connection：stale state、未站立阻止真实动作
 - [x] hybrid channel：vx+vyaw 走 joystick，vy 走 Move
@@ -305,6 +306,7 @@ Prep 序列（实机 teleop 自动执行）：`stand_up → balance_stand → fr
 ### 自动化测试
 
 - 183 passed（含 `test_unitree_webrtc_transport`、`test_teleop_web_combine` 等）。
+- 188 passed（新增 watchdog、取消、发布异常、断连、后验升级 stop 单测）。
 - 混合通道、motion lease、Move payload、release/stop 均有单测覆盖。
 
 ### 真机结果（2026-06-11，Go2 STA-L / MCF / IP 10.10.196.239）
@@ -314,6 +316,6 @@ Prep 序列（实机 teleop 自动执行）：`stand_up → balance_stand → fr
 
 ### 下一步
 
-- 跑完 `--graded --level 5` 并归档 JSON 摘要。
+- 真机跑完 `--graded --level 5 --output-json acceptance.json` 并归档 JSON 摘要。
 - 感知流（LiDAR / 里程计 / 视频）与闭环局部运动。
 - 评估是否将 teleop 能力以只读监控形式接入主服务（仍不开放 LLM drive）。
