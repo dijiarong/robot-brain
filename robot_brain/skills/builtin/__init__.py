@@ -10,14 +10,24 @@ from .catalog import (
     StopSkill,
     default_skills,
 )
+from .go2_catalog import (
+    NudgeSkill,
+    RetreatSkill,
+    ScanSkill,
+    go2_skills,
+)
 
 __all__ = [
     "DockSkill",
     "FollowSkill",
     "NavigateSkill",
+    "NudgeSkill",
     "PatrolSkill",
     "RecognizeSkill",
     "ReportSkill",
+    "RetreatSkill",
+    "ScanSkill",
     "StopSkill",
     "default_skills",
+    "go2_skills",
 ]

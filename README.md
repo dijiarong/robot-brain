@@ -110,6 +110,21 @@ RDB_UNITREE_DRY_RUN=true RDB_UNITREE_ROBOT_IP=<ip> \
 python -m examples.run_service
 ```
 
+**LLM 可调用 Go2 技能（第十一次迭代）：** 设置 `RDB_ROBOT=unitree` 后，以下运动技能自动注册，LLM 可通过 tool call 调用。每个技能走完整安全链路（前置检查 → 分段 drive → post-verify），速度和距离受限，live 默认需操作者确认。
+
+| 技能 | 说明 | 范围 |
+|------|------|------|
+| `nudge` | 短距平移 (forward/back/left/right) | 10–50 cm |
+| `scan` | 原地旋转观察 (±yaw_degrees) | ±90° |
+| `retreat` | 后退安全距离 | 10–100 cm |
+
+**依赖**：技能前置检查读取 `WorldState.robot_self_state`，因此须同时设置 `RDB_PERCEPTION=unitree`，否则技能会返回 `self-state not available`。
+
+```bash
+# mock 下体验 (dry-run, 不动作)
+RDB_ROBOT=unitree RDB_PERCEPTION=unitree python -m examples.run_service
+```
+
 ## API
 
 | Method | Path | Description |

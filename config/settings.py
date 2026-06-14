@@ -26,7 +26,7 @@ class Settings:
     # Safety constraints.
     max_linear_speed: float = 1.5
     max_step_distance: float = 30.0
-    require_confirmation_for: tuple[str, ...] = ("follow",)
+    require_confirmation_for: tuple[str, ...] = ("follow", "nudge", "scan", "retreat")
     object_ttl_seconds: float = 30.0
 
     # Runtime.

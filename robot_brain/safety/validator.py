@@ -112,4 +112,17 @@ class SafetyValidator:
             self.settings.object_ttl_seconds,
         ):
             return "follow target has not been perceived recently"
+        # Go2 motion skills
+        if skill_name == "nudge":
+            d = params.get("distance_cm", 20.0)
+            if not (10.0 <= d <= 50.0):
+                return "nudge distance must be 10–50 cm"
+        if skill_name == "scan":
+            y = params.get("yaw_degrees", 45.0)
+            if not (-90.0 <= y <= 90.0):
+                return "scan angle must be ±90°"
+        if skill_name == "retreat":
+            d = params.get("distance_cm", 30.0)
+            if not (10.0 <= d <= 100.0):
+                return "retreat distance must be 10–100 cm"
         return ""

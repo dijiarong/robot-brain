@@ -129,7 +129,12 @@ class AgentRuntime:
                 perception = UnitreePerceptionAdapter(robot)
             else:
                 raise ValueError(f"unsupported perception backend: {settings.perception_backend}")
-        skills = SkillRegistry(default_skills())
+        if settings.robot_backend == "unitree":
+            from robot_brain.skills.builtin.go2_catalog import go2_skills
+
+            skills = SkillRegistry(default_skills() + go2_skills(settings))
+        else:
+            skills = SkillRegistry(default_skills())
         if llm is None:
             if settings.llm_backend == "mock":
                 llm = MockLLM()
