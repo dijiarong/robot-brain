@@ -115,9 +115,20 @@ class AgentRuntime:
             else:
                 raise ValueError(f"unsupported robot backend: {settings.robot_backend}")
         if perception is None:
-            if settings.perception_backend != "mock":
+            if settings.perception_backend == "mock":
+                perception = MockPerception(robot)
+            elif settings.perception_backend == "unitree":
+                from robot_brain.actuation.unitree import UnitreeRobot
+                from robot_brain.perception.unitree import UnitreePerceptionAdapter
+
+                if not isinstance(robot, UnitreeRobot):
+                    raise ValueError(
+                        "unitree perception backend requires a UnitreeRobot; "
+                        f"got {type(robot).__name__}"
+                    )
+                perception = UnitreePerceptionAdapter(robot)
+            else:
                 raise ValueError(f"unsupported perception backend: {settings.perception_backend}")
-            perception = MockPerception(robot)
         skills = SkillRegistry(default_skills())
         if llm is None:
             if settings.llm_backend == "mock":

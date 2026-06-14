@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 
 from pydantic import BaseModel, Field
 
+from robot_brain.core.robot_self_state import ImuRPY, RobotSelfState, Velocity
 from robot_brain.core.world_state import DetectedObject, Position
 
 
@@ -17,6 +18,7 @@ class Observation(BaseModel):
     payload: str | None = None
     detected_objects: list[DetectedObject] = Field(default_factory=list)
     alerts: list[str] = Field(default_factory=list)
+    self_state: RobotSelfState | None = None
 
 
 class PerceptionAdapter(ABC):

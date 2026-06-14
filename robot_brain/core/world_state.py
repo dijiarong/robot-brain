@@ -6,6 +6,8 @@ from typing import Any, Literal, TYPE_CHECKING
 
 from pydantic import BaseModel, Field
 
+from robot_brain.core.robot_self_state import RobotSelfState
+
 if TYPE_CHECKING:
     from robot_brain.perception.base import Observation
 
@@ -43,6 +45,7 @@ class WorldState(BaseModel):
     alerts: list[str] = Field(default_factory=list)
     current_task: TaskProgress | None = None
     estop_active: bool = False
+    robot_self_state: RobotSelfState | None = None
 
     def apply_observation(self, observation: "Observation", *, object_ttl_seconds: float | None = None) -> None:
         if observation.position is not None:
@@ -53,6 +56,8 @@ class WorldState(BaseModel):
             self.battery_level = observation.battery_level
         if observation.payload is not None:
             self.payload = observation.payload
+        if observation.self_state is not None:
+            self.robot_self_state = observation.self_state.model_copy(deep=True)
         for item in observation.detected_objects:
             perceived = item.model_copy(deep=True)
             perceived.last_seen_at = observation.observed_at
@@ -81,3 +86,17 @@ class WorldState(BaseModel):
 
     def snapshot(self) -> dict[str, Any]:
         return self.model_dump(mode="json")
+
+    @property
+    def state_age_seconds(self) -> float | None:
+        """Convenience accessor for the robot-reported state age."""
+        if self.robot_self_state is None:
+            return None
+        return self.robot_self_state.state_age_seconds
+
+    @property
+    def robot_error_code(self) -> int | None:
+        """Convenience accessor for the robot error code."""
+        if self.robot_self_state is None:
+            return None
+        return self.robot_self_state.error_code

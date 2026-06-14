@@ -4,7 +4,7 @@
 
 - 创建时间：2026-06-11 17:20:47 CST
 - 文件序号：2026-06-11-172047
-- 状态：阶段 A–E 代码完成；Level 0–5 分级验收与部分真机 teleop 已在 LAN 实机验证通过
+- 状态：阶段 A–E 代码完成，自动化测试通过；Level 0–5 分级验收 **待现场**（Web teleop 已单独实机验证通过）
 - 负责人：dijia
 - 前置迭代：[第八次迭代：WebRTC 真实姿态/急停动作下发与安全门](./2026-06-08-141602-unitree-webrtc-posture-actions.md)
 - 技术参考：[DimOS 连接宇树 Go2 技术文档](../dimos-go2-connection.md)

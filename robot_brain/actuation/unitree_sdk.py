@@ -55,6 +55,7 @@ class UnitreeSDKTransport(UnitreeTransport):
         self._connected = False
         self._last_sport_state: Any = None
         self._last_low_state: Any = None
+        self._last_sport_state_mono: float = 0.0
         self._state_lock = threading.Lock()
         self._subscriber: Any = None
         self._low_subscriber: Any = None
@@ -62,6 +63,11 @@ class UnitreeSDKTransport(UnitreeTransport):
     @property
     def is_connected(self) -> bool:
         return self._connected
+
+    def state_age_seconds(self) -> float:
+        if self._last_sport_state_mono <= 0.0:
+            return float("inf")
+        return time.monotonic() - self._last_sport_state_mono
 
     async def connect(self) -> None:
         if self._connected:
@@ -148,6 +154,7 @@ class UnitreeSDKTransport(UnitreeTransport):
         """DDS callback for SportModeState_ — runs in SDK thread."""
         with self._state_lock:
             self._last_sport_state = msg
+            self._last_sport_state_mono = time.monotonic()
 
     def _on_low_state(self, msg: Any) -> None:
         """DDS callback for LowState_ — runs in SDK thread."""
@@ -218,6 +225,9 @@ class UnitreeSDKTransport(UnitreeTransport):
                 if voltage > 0:
                     battery = max(0.0, min(100.0, (voltage - 24.0) / (33.6 - 24.0) * 100.0))
 
+            # Raw IMU rpy
+            raw_rpy = imu.rpy if imu and hasattr(imu, "rpy") else [0.0, 0.0, 0.0]
+
             return UnitreeState(
                 connected=True,
                 battery_level=battery,
@@ -226,6 +236,16 @@ class UnitreeSDKTransport(UnitreeTransport):
                 is_standing=is_standing,
                 is_moving=is_moving,
                 error_code=error_code,
+                velocity=(
+                    float(vel[0]) if len(vel) >= 1 else 0.0,
+                    float(vel[1]) if len(vel) >= 2 else 0.0,
+                    float(vel[2]) if len(vel) >= 3 else 0.0,
+                ),
+                imu_rpy=(
+                    float(raw_rpy[0]) if len(raw_rpy) >= 1 else 0.0,
+                    float(raw_rpy[1]) if len(raw_rpy) >= 2 else 0.0,
+                    float(raw_rpy[2]) if len(raw_rpy) >= 3 else 0.0,
+                ),
             )
         except Exception as exc:
             logger.warning("State mapping error: %s", exc)
@@ -234,6 +254,8 @@ class UnitreeSDKTransport(UnitreeTransport):
     def _map_state(self, raw: dict[str, Any]) -> UnitreeState:
         """Map a raw dict (from injected client) to UnitreeState."""
         pos = raw.get("position") or {}
+        vel = raw.get("velocity") or (0.0, 0.0, 0.0)
+        rpy = raw.get("imu_rpy") or (0.0, 0.0, 0.0)
         return UnitreeState(
             connected=raw.get("connected") or True,
             battery_level=raw.get("battery_level") or 100.0,
@@ -245,6 +267,16 @@ class UnitreeSDKTransport(UnitreeTransport):
             is_standing=raw.get("is_standing") or False,
             is_moving=raw.get("is_moving") or False,
             error_code=raw.get("error_code") or 0,
+            velocity=(
+                float(vel[0]) if len(vel) >= 1 else 0.0,
+                float(vel[1]) if len(vel) >= 2 else 0.0,
+                float(vel[2]) if len(vel) >= 3 else 0.0,
+            ),
+            imu_rpy=(
+                float(rpy[0]) if len(rpy) >= 1 else 0.0,
+                float(rpy[1]) if len(rpy) >= 2 else 0.0,
+                float(rpy[2]) if len(rpy) >= 3 else 0.0,
+            ),
         )
 
 

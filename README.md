@@ -102,6 +102,14 @@ RDB_UNITREE_ENABLE_MOTION=true python -m examples.run_unitree_smoke \
 
 安全要点：`RDB_UNITREE_DRY_RUN=true`（默认）、`RDB_UNITREE_ENABLE_MOTION=false`（默认）；真实平移需同时 `--live` 与 motion gate。MCF 固件上前进/侧移走 Move(1008)，含转向（含 W+D 弧线）走虚拟摇杆通道，详见第九次迭代文档。
 
+**感知桥接（第十次迭代）：** 设置 `RDB_PERCEPTION=unitree` 后，Go2 的真实 sport mode、error_code、速度、IMU 姿态、站立/运动状态会通过 `UnitreePerceptionAdapter` 注入 `WorldState.robot_self_state`，进入认知链路（FastReflex / LLM / 技能均可读取）。不影响默认 mock 路径。真机验证方式：
+
+```bash
+RDB_ROBOT=unitree RDB_UNITREE_TRANSPORT=webrtc RDB_PERCEPTION=unitree \
+RDB_UNITREE_DRY_RUN=true RDB_UNITREE_ROBOT_IP=<ip> \
+python -m examples.run_service
+```
+
 ## API
 
 | Method | Path | Description |
@@ -168,7 +176,7 @@ $env:RDB_MEMORY_DB = "D:\robot-data\robot_brain.sqlite3"
 | --- | --- | --- |
 | `RDB_LLM` | `mock` | LLM 后端，当前支持 `mock` 和可选 `openai` |
 | `RDB_ROBOT` | `mock` | 机器人后端 |
-| `RDB_PERCEPTION` | `mock` | 感知后端 |
+| `RDB_PERCEPTION` | `mock` | 感知后端，支持 `mock` / `unitree`（Go2 本体状态桥接） |
 | `RDB_MEMORY_DB` | `data/robot_brain.sqlite3` | SQLite 路径 |
 | `RDB_VERBOSE` | `true` | 是否启用详细日志 |
 | `RDB_OPENAI_MODEL` | `gpt-4o-mini` | 可选 OpenAI 适配器模型 |

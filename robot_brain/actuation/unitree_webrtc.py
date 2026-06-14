@@ -1046,6 +1046,8 @@ class UnitreeWebRTCTransport(UnitreeTransport):
                 is_moving=is_moving,
                 error_code=error_code,
                 sport_mode=mode,
+                velocity=(float(vel[0]), float(vel[1]), float(vel[2]) if len(vel) >= 3 else 0.0),
+                imu_rpy=(float(rpy[0]), float(rpy[1]), float(rpy[2]) if len(rpy) >= 3 else 0.0),
             )
         except Exception as exc:
             logger.warning("WebRTC state mapping error: %s", exc)

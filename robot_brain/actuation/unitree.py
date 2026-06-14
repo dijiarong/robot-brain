@@ -29,6 +29,10 @@ class UnitreeState(BaseModel):
     error_code: int = 0
     # Go2 SportModeState.mode when available (WebRTC / SDK).
     sport_mode: int | None = None
+    # Body-frame velocity (vx, vy, vz) in m/s — raw Go2 format.
+    velocity: tuple[float, float, float] = (0.0, 0.0, 0.0)
+    # IMU orientation (roll, pitch, yaw) in radians — raw Go2 format.
+    imu_rpy: tuple[float, float, float] = (0.0, 0.0, 0.0)
 
 
 class UnitreeCommand(BaseModel):
@@ -58,6 +62,10 @@ class UnitreeTransport(ABC):
     @abstractmethod
     def is_connected(self) -> bool: ...
 
+    def state_age_seconds(self) -> float:
+        """Seconds since the last sport-state callback (inf if never received)."""
+        return float("inf")
+
 
 class FakeUnitreeTransport(UnitreeTransport):
     """In-memory fake transport for CI and unit tests."""
@@ -85,6 +93,10 @@ class FakeUnitreeTransport(UnitreeTransport):
             raise ConnectionError("Transport not connected")
         return self._state.model_copy(deep=True)
 
+    def state_age_seconds(self) -> float:
+        """Fake transport always reports fresh state."""
+        return 0.0
+
     async def send_command(self, command: UnitreeCommand) -> bool:
         if not self._connected:
             raise ConnectionError("Transport not connected")
@@ -98,6 +110,7 @@ class FakeUnitreeTransport(UnitreeTransport):
     def _apply_command(self, command: UnitreeCommand) -> None:
         if command.action == "stop":
             self._state.is_moving = False
+            self._state.velocity = (0.0, 0.0, 0.0)
         elif command.action == "move":
             target = command.parameters.get("target", {})
             self._state.position = Position(x=target.get("x", 0), y=target.get("y", 0))
@@ -108,6 +121,7 @@ class FakeUnitreeTransport(UnitreeTransport):
             # Velocity teleop is open-loop; the fake just reflects that the
             # robot was briefly moving and ends stopped (auto-stop).
             self._state.is_moving = False
+            self._state.velocity = (0.0, 0.0, 0.0)
 
 
 class UnitreeRobot(RobotInterface):
@@ -135,6 +149,11 @@ class UnitreeRobot(RobotInterface):
     @property
     def action_history(self) -> list[dict[str, Any]]:
         return self._action_history
+
+    @property
+    def transport(self) -> UnitreeTransport:
+        """Expose the underlying transport for perception adapters."""
+        return self._transport
 
     @property
     def dry_run(self) -> bool:
