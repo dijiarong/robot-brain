@@ -15,6 +15,7 @@
 - [第八次迭代：WebRTC 真实姿态/急停动作下发与安全门](./2026-06-08-141602-unitree-webrtc-posture-actions.md)：在 WebRTC transport 开放不产生平移的姿态/急停命令，引入 enable_motion 硬安全门，平移仍拒绝。
 - [第九次迭代：Unitree Go2 WebRTC 实机操控安全闭环](./2026-06-11-172047-unitree-live-control-loop.md)：低速限时操控、motion lease、Web teleop、MCF 混合通道；阶段 A–E 代码/测试完成，分级验收待现场。
 - [第十次迭代：Go2 Perception Bridge](./2026-06-13-000000-unitree-perception-bridge.md)：打通 Go2 sport state → Observation → WorldState，新增 RobotSelfState 模型与 UnitreePerceptionAdapter；代码/测试完成，真机验证待现场。
+- [第十一次迭代：Go2 原生技能族](./2026-06-14-000000-go2-skill-family.md)：nudge / scan / retreat 三技能映射到 drive()，完整安全链路，LLM 可调用；设计中。
 
 ## 新增计划
 
