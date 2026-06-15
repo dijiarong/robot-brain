@@ -9,7 +9,7 @@ from config.settings import Settings
 from robot_brain.core.errors import ErrorCode
 from robot_brain.core.world_state import Position, WorldState
 from robot_brain.llm.base import ToolCall
-from robot_brain.skills.registry import SkillRegistry
+from robot_brain.skills.registry import SkillRegistry, UNITREE_HIDDEN_SKILLS
 
 
 class ValidationResult(BaseModel):
@@ -39,6 +39,14 @@ class SafetyValidator:
             return ValidationResult(
                 allowed=False,
                 reason=f"skill is not whitelisted: {call.skill_name}",
+                error_code=ErrorCode.SAFETY_NOT_WHITELISTED,
+            )
+
+        backend_err = self._validate_backend(call.skill_name)
+        if backend_err:
+            return ValidationResult(
+                allowed=False,
+                reason=backend_err,
                 error_code=ErrorCode.SAFETY_NOT_WHITELISTED,
             )
 
@@ -125,4 +133,15 @@ class SafetyValidator:
             d = params.get("distance_cm", 30.0)
             if not (10.0 <= d <= 100.0):
                 return "retreat distance must be 10–100 cm"
+        return ""
+
+    def _validate_backend(self, skill_name: str) -> str:
+        """Reject skills that are hidden on the current backend.
+
+        On unitree, generic motion skills (navigate/patrol/follow/dock)
+        are hidden from the LLM tool list *and* hard-rejected here so a
+        direct API call cannot bypass the filter.
+        """
+        if self.settings.robot_backend == "unitree" and skill_name in UNITREE_HIDDEN_SKILLS:
+            return f"skill '{skill_name}' is unsupported on unitree backend"
         return ""

@@ -53,7 +53,10 @@ class BrainGraph:
 
 
 def build_graph(context: AgentContext) -> BrainGraph:
-    planner = Planner(context.llm, context.skills, context.short_term, context.long_term)
+    planner = Planner(
+        context.llm, context.skills, context.short_term, context.long_term,
+        backend=context.settings.robot_backend,
+    )
     dual_system = DualSystem(FastReflex(context.settings), planner)
     nodes = OrchestrationNodes(context, dual_system)
     if StateGraph is None:

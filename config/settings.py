@@ -106,5 +106,10 @@ class Settings:
         in ("1", "true", "yes")
     )
 
+    # Go2 FastReflex — consecutive non-zero error_code reads before triggering stop.
+    go2_reflex_error_debounce: int = field(
+        default_factory=lambda: int(os.getenv("RDB_GO2_REFLEX_ERROR_DEBOUNCE", "1"))
+    )
+
 
 SETTINGS = Settings()

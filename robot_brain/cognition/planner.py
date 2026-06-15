@@ -16,17 +16,21 @@ class Planner:
         skills: SkillRegistry,
         short_term: ShortTermMemory,
         long_term: LongTermMemory,
+        *,
+        backend: str = "mock",
     ) -> None:
         self.llm = llm
         self.skills = skills
         self.short_term = short_term
         self.long_term = long_term
+        self._backend = backend
         self._validator = LLMOutputValidator(skills)
 
     async def plan(self, command: str, world: WorldState) -> list[ToolCall]:
         experiences = self.long_term.search(command)
         memories = self.short_term.recent() + [item.summary for item in experiences]
-        calls = await self.llm.plan(command, world, self.skills.tools(), memories)
+        tools = self.skills.tools_for_backend(self._backend)
+        calls = await self.llm.plan(command, world, tools, memories)
         calls, errors = self._validator.validate_tool_calls(calls)
         for error in errors:
             self.short_term.add(f"LLM output rejected: [{error.code}] {error.message}")
