@@ -1,0 +1,1111 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Robot Brain — Cognition Console</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* ── Reset & Design Tokens ───────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:           #ffffff;
+  --bg-panel:     #f8f8f9;
+  --bg-hover:     #f3f3f4;
+  --text:         #0f0f0f;
+  --text-muted:   #6b6b6b;
+  --text-faint:   #a0a0a0;
+  --border:       #e8e8e8;
+  --border-light: #f0f0f0;
+  --signal:       #7c3aed;
+  --signal-soft:  rgba(124, 58, 237, 0.08);
+  --signal-glow:  rgba(124, 58, 237, 0.18);
+  --danger:       #dc2626;
+  --danger-soft:  rgba(220, 38, 38, 0.06);
+  --success:      #16a34a;
+  --success-soft: rgba(22, 163, 74, 0.06);
+  --warning:      #f59e0b;
+  --warning-soft: rgba(245, 158, 11, 0.08);
+  --ff-display:   'DM Serif Display', Georgia, 'Times New Roman', serif;
+  --ff-body:      'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  --ff-mono:      'JetBrains Mono', 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
+  --radius-sm:    4px;
+  --radius-md:    6px;
+  --radius-lg:    8px;
+  --shadow-sm:    0 1px 2px rgba(0,0,0,0.04);
+  --shadow-md:    0 4px 12px rgba(0,0,0,0.06);
+  --transition:   180ms ease;
+}
+
+html { font-size: 14px; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+
+body {
+  font-family: var(--ff-body);
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  line-height: 1.5;
+}
+
+/* ── Identity Bar ────────────────────────────────────── */
+.identity-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 24px;
+  height: 48px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+  flex-shrink: 0;
+}
+
+.identity-bar__brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--ff-display);
+  font-size: 1.2rem;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+
+.identity-bar__brand .diamond {
+  width: 8px; height: 8px;
+  background: var(--signal);
+  transform: rotate(45deg);
+  border-radius: 1px;
+  flex-shrink: 0;
+}
+
+.identity-bar__status {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  font-size: 0.8rem;
+  font-family: var(--ff-mono);
+  color: var(--text-muted);
+}
+
+.status-dot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--border);
+  flex-shrink: 0;
+  transition: background var(--transition);
+}
+
+.status-dot--online { background: var(--success); }
+.status-dot--warning { background: var(--warning); }
+.status-dot--danger  { background: var(--danger); }
+.status-dot--pulse {
+  animation: dot-pulse 2s ease-in-out infinite;
+}
+@keyframes dot-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(22, 163, 74, 0.4); }
+  50%      { box-shadow: 0 0 0 6px rgba(22, 163, 74, 0); }
+}
+
+.ws-indicator {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--ff-mono);
+  font-size: 0.7rem;
+  color: var(--text-faint);
+}
+.ws-indicator .dot { width: 5px; height: 5px; border-radius: 50%; background: var(--border); }
+.ws-indicator--live .dot { background: var(--success); }
+
+/* ── Main Console Grid ───────────────────────────────── */
+.console {
+  display: grid;
+  grid-template-columns: 280px 1fr 320px;
+  grid-template-rows: 1fr auto;
+  flex: 1;
+  overflow: hidden;
+  min-height: 0;
+}
+
+/* ── Panels ──────────────────────────────────────────── */
+.panel {
+  border-right: 1px solid var(--border-light);
+  padding: 20px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.panel:last-child { border-right: none; border-left: 1px solid var(--border-light); }
+.panel--center { border-left: none; border-right: 1px solid var(--border-light); }
+
+.panel__header {
+  font-family: var(--ff-mono);
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  margin-bottom: 4px;
+}
+
+.panel__section { display: flex; flex-direction: column; gap: 8px; }
+
+.panel__section-title {
+  font-family: var(--ff-mono);
+  font-size: 0.6rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border-light);
+}
+
+/* ── Telemetry Row ───────────────────────────────────── */
+.telemetry-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.telemetry-item {
+  background: var(--bg-panel);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  border: 1px solid transparent;
+  transition: border-color var(--transition);
+}
+
+.telemetry-item__label {
+  font-size: 0.62rem;
+  font-family: var(--ff-mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  margin-bottom: 3px;
+}
+
+.telemetry-item__value {
+  font-family: var(--ff-mono);
+  font-size: 0.95rem;
+  font-weight: 500;
+  color: var(--text);
+  word-break: break-all;
+}
+
+.telemetry-item--highlight { border-color: var(--signal-soft); background: var(--signal-soft); }
+.telemetry-item--danger { border-color: var(--danger-soft); background: var(--danger-soft); }
+.telemetry-item--danger .telemetry-item__value { color: var(--danger); }
+
+/* ── Battery bar ─────────────────────────────────────── */
+.battery-bar {
+  height: 3px;
+  border-radius: 2px;
+  background: var(--border-light);
+  margin-top: 4px;
+  overflow: hidden;
+}
+
+.battery-bar__fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.5s ease, background 0.5s ease;
+}
+
+/* ── Alert ───────────────────────────────────────────── */
+.alert-item {
+  font-family: var(--ff-mono);
+  font-size: 0.7rem;
+  color: var(--warning);
+  background: var(--warning-soft);
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  border-left: 2px solid var(--warning);
+  word-break: break-all;
+}
+
+.alert-item--critical {
+  color: var(--danger);
+  background: var(--danger-soft);
+  border-left-color: var(--danger);
+}
+
+/* ── Objects List ────────────────────────────────────── */
+.objects-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 140px;
+  overflow-y: auto;
+}
+
+.object-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  font-size: 0.72rem;
+  font-family: var(--ff-mono);
+  color: var(--text-muted);
+  background: var(--bg-panel);
+}
+
+.object-item__kind { font-weight: 500; color: var(--text); }
+.object-item__confidence { margin-left: auto; font-size: 0.65rem; color: var(--text-faint); }
+
+.empty-state {
+  font-size: 0.7rem;
+  color: var(--text-faint);
+  font-style: italic;
+  padding: 12px 0;
+  text-align: center;
+}
+
+/* ── Cognition Pipeline ──────────────────────────────── */
+.pipeline {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+  padding: 8px 0;
+}
+
+.pipeline-stage {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  max-width: 380px;
+  position: relative;
+}
+
+.pipeline-stage__node {
+  width: 36px; height: 36px;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--ff-mono);
+  font-size: 0.55rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--text-faint);
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  flex-shrink: 0;
+  transition: all var(--transition);
+  position: relative;
+}
+
+.pipeline-stage__label {
+  font-family: var(--ff-mono);
+  font-size: 0.7rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  text-transform: lowercase;
+  letter-spacing: 0.02em;
+  transition: color var(--transition);
+}
+
+.pipeline-stage__connector {
+  width: 1px;
+  height: 16px;
+  background: var(--border);
+  margin-left: 18px;
+  transition: background var(--transition);
+}
+
+.pipeline-stage--active .pipeline-stage__node {
+  background: var(--signal);
+  border-color: var(--signal);
+  color: #fff;
+  box-shadow: 0 0 16px var(--signal-glow);
+  animation: node-pulse 2s ease-in-out infinite;
+}
+
+.pipeline-stage--active .pipeline-stage__label { color: var(--signal); font-weight: 600; }
+.pipeline-stage--active .pipeline-stage__connector { background: var(--signal); }
+
+.pipeline-stage--done .pipeline-stage__node {
+  background: var(--signal-soft);
+  border-color: var(--signal-soft);
+  color: var(--signal);
+}
+
+.pipeline-stage--done .pipeline-stage__label { color: var(--text); }
+
+@keyframes node-pulse {
+  0%, 100% { box-shadow: 0 0 12px var(--signal-glow); }
+  50%      { box-shadow: 0 0 24px rgba(124, 58, 237, 0.35); }
+}
+
+.pipeline-legend {
+  display: flex;
+  gap: 16px;
+  justify-content: center;
+  font-size: 0.62rem;
+  font-family: var(--ff-mono);
+  color: var(--text-faint);
+  margin-top: 8px;
+}
+
+.pipeline-legend span { display: flex; align-items: center; gap: 4px; }
+.pipeline-legend .swatch { width: 8px; height: 8px; border-radius: 2px; flex-shrink: 0; }
+.swatch--active { background: var(--signal); }
+.swatch--done   { background: var(--signal-soft); border: 1px solid var(--signal); }
+.swatch--idle   { background: var(--bg-panel); border: 1px solid var(--border); }
+
+/* ── Decision Context ────────────────────────────────── */
+.decision-block {
+  background: var(--bg-panel);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  font-family: var(--ff-mono);
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  max-height: 120px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+  line-height: 1.6;
+}
+
+/* ── Task List ───────────────────────────────────────── */
+.task-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.task-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 0.72rem;
+  background: var(--bg-panel);
+  border: 1px solid transparent;
+  transition: all var(--transition);
+}
+
+.task-item:hover { background: var(--bg-hover); }
+
+.task-item__status {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.task-item__status--running  { background: var(--signal); }
+.task-item__status--queued   { background: var(--text-faint); }
+.task-item__status--completed{ background: var(--success); }
+.task-item__status--failed   { background: var(--danger); }
+.task-item__status--paused   { background: var(--warning); }
+.task-item__status--cancelled{ background: var(--border); }
+
+.task-item__objective {
+  flex: 1;
+  font-weight: 500;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.task-item__meta {
+  font-family: var(--ff-mono);
+  font-size: 0.62rem;
+  color: var(--text-faint);
+  flex-shrink: 0;
+}
+
+/* ── Quick Actions ───────────────────────────────────── */
+.actions-row { display: flex; gap: 6px; }
+
+.btn {
+  font-family: var(--ff-mono);
+  font-size: 0.68rem;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  padding: 8px 14px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  cursor: pointer;
+  transition: all var(--transition);
+  white-space: nowrap;
+}
+
+.btn:hover { background: var(--bg-hover); border-color: var(--text-faint); }
+
+.btn--primary {
+  background: var(--signal);
+  border-color: var(--signal);
+  color: #fff;
+}
+.btn--primary:hover { background: #6d28d9; border-color: #6d28d9; }
+
+.btn--danger { color: var(--danger); border-color: var(--danger); background: var(--bg); }
+.btn--danger:hover { background: var(--danger); color: #fff; }
+
+.btn--sm { padding: 4px 8px; font-size: 0.6rem; }
+
+/* ── Task Input ──────────────────────────────────────── */
+.task-input-row { display: flex; gap: 4px; }
+
+.task-input-row input {
+  flex: 1;
+  font-family: var(--ff-mono);
+  font-size: 0.72rem;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--text);
+  outline: none;
+  transition: border-color var(--transition);
+}
+
+.task-input-row input:focus { border-color: var(--signal); }
+.task-input-row input::placeholder { color: var(--text-faint); }
+
+/* ── Event Log ───────────────────────────────────────── */
+.event-log {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 160px;
+  overflow-y: auto;
+  font-family: var(--ff-mono);
+  font-size: 0.62rem;
+}
+
+.event-log__item { display: flex; gap: 8px; color: var(--text-muted); padding: 2px 0; }
+.event-log__time { color: var(--text-faint); flex-shrink: 0; }
+.event-log__type { color: var(--text-faint); flex-shrink: 0; min-width: 80px; }
+.event-log__msg  { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.event-log__item--important .event-log__type { color: var(--signal); font-weight: 600; }
+
+/* ── Command Bar ─────────────────────────────────────── */
+.command-bar {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 20px;
+  height: 40px;
+  border-top: 1px solid var(--border);
+  background: var(--bg);
+  font-family: var(--ff-mono);
+  font-size: 0.72rem;
+  color: var(--text-faint);
+}
+
+.command-bar .prompt { color: var(--signal); font-weight: 500; }
+
+.command-bar input {
+  flex: 1;
+  border: none;
+  outline: none;
+  font-family: var(--ff-mono);
+  font-size: 0.72rem;
+  background: transparent;
+  color: var(--text);
+}
+
+.command-bar input::placeholder { color: var(--text-faint); }
+
+/* ── Last Result ─────────────────────────────────────── */
+.last-result {
+  font-family: var(--ff-mono);
+  font-size: 0.62rem;
+  color: var(--text-faint);
+  padding: 4px 8px;
+  background: var(--bg-panel);
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── Estop badge ─────────────────────────────────────── */
+.estop-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--ff-mono);
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  padding: 3px 8px;
+  border-radius: 3px;
+  background: var(--danger-soft);
+  color: var(--danger);
+  animation: estop-blink 0.8s ease-in-out infinite;
+}
+
+@keyframes estop-blink {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.5; }
+}
+
+/* ── Scrollbar ───────────────────────────────────────── */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-faint); }
+
+/* ── Reduced motion ──────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ── Focus visible ──────────────────────────────────── */
+:focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
+
+/* ── Responsive ──────────────────────────────────────── */
+@media (max-width: 960px) {
+  .console { grid-template-columns: 1fr; grid-template-rows: auto; overflow-y: auto; }
+  .panel { border-right: none; border-bottom: 1px solid var(--border-light); }
+  .panel:last-child { border-left: none; }
+  .identity-bar { padding: 0 16px; }
+  .identity-bar__status { gap: 10px; font-size: 0.7rem; }
+}
+
+@media (max-width: 480px) {
+  html { font-size: 13px; }
+  .console { grid-template-columns: 1fr; }
+  .telemetry-row { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+
+<!-- ── Identity Bar ──────────────────────────────────── -->
+<header class="identity-bar">
+  <div class="identity-bar__brand">
+    <span class="diamond"></span>
+    Robot Brain
+  </div>
+  <div class="identity-bar__status">
+    <span id="service-status-dot" class="status-dot" title="Service status"></span>
+    <span id="robot-label">Go2</span>
+    <span>·</span>
+    <span id="battery-header">--%</span>
+    <span class="ws-indicator" id="ws-indicator">
+      <span class="dot"></span>
+      <span id="ws-text">offline</span>
+    </span>
+  </div>
+</header>
+
+<!-- ── Main Console ──────────────────────────────────── -->
+<main class="console">
+
+  <!-- Left Panel: State + Objects -->
+  <aside class="panel" id="panel-left">
+    <div class="panel__header">Telemetry</div>
+
+    <div class="panel__section">
+      <div class="telemetry-row">
+        <div class="telemetry-item">
+          <div class="telemetry-item__label">Position X</div>
+          <div class="telemetry-item__value" id="pos-x">--</div>
+        </div>
+        <div class="telemetry-item">
+          <div class="telemetry-item__label">Position Y</div>
+          <div class="telemetry-item__value" id="pos-y">--</div>
+        </div>
+        <div class="telemetry-item">
+          <div class="telemetry-item__label">Heading</div>
+          <div class="telemetry-item__value" id="heading">--°</div>
+        </div>
+        <div class="telemetry-item">
+          <div class="telemetry-item__label">Battery</div>
+          <div class="telemetry-item__value" id="battery">--%</div>
+          <div class="battery-bar"><div class="battery-bar__fill" id="battery-fill" style="width:0%"></div></div>
+        </div>
+        <div class="telemetry-item" id="estop-item">
+          <div class="telemetry-item__label">E‑Stop</div>
+          <div class="telemetry-item__value" id="estop">clear</div>
+        </div>
+        <div class="telemetry-item">
+          <div class="telemetry-item__label">Sport Mode</div>
+          <div class="telemetry-item__value" id="sport-mode">--</div>
+        </div>
+        <div class="telemetry-item">
+          <div class="telemetry-item__label">Error Code</div>
+          <div class="telemetry-item__value" id="error-code">--</div>
+        </div>
+        <div class="telemetry-item">
+          <div class="telemetry-item__label">Velocity (vx, vy, vz)</div>
+          <div class="telemetry-item__value" id="velocity">--</div>
+        </div>
+        <div class="telemetry-item">
+          <div class="telemetry-item__label">IMU (roll / pitch / yaw)</div>
+          <div class="telemetry-item__value" id="imu">--</div>
+        </div>
+        <div class="telemetry-item">
+          <div class="telemetry-item__label">Standing</div>
+          <div class="telemetry-item__value" id="standing">--</div>
+        </div>
+        <div class="telemetry-item">
+          <div class="telemetry-item__label">Moving</div>
+          <div class="telemetry-item__value" id="moving">--</div>
+        </div>
+        <div class="telemetry-item">
+          <div class="telemetry-item__label">State Age</div>
+          <div class="telemetry-item__value" id="state-age">--</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel__section" id="alerts-section" style="display:none">
+      <div class="panel__section-title">Alerts</div>
+      <div id="alerts-list"></div>
+    </div>
+
+    <div class="panel__section">
+      <div class="panel__section-title">Detected Objects</div>
+      <div class="objects-list" id="objects-list">
+        <div class="empty-state">No objects detected</div>
+      </div>
+    </div>
+
+    <div class="panel__section">
+      <div class="last-result" id="last-result">No activity yet</div>
+    </div>
+  </aside>
+
+  <!-- Center Panel: Cognition Pipeline + Decision -->
+  <section class="panel panel--center" id="panel-center">
+    <div class="panel__header">Cognition Pipeline</div>
+
+    <div class="pipeline" id="pipeline">
+      <!-- Generated by JS -->
+    </div>
+
+    <div class="pipeline-legend">
+      <span><span class="swatch swatch--active"></span> active</span>
+      <span><span class="swatch swatch--done"></span> complete</span>
+      <span><span class="swatch swatch--idle"></span> idle</span>
+    </div>
+
+    <div class="panel__section">
+      <div class="panel__section-title">Latest Decision</div>
+      <div class="decision-block" id="decision-block">No decisions recorded yet.</div>
+    </div>
+  </section>
+
+  <!-- Right Panel: Tasks + Events -->
+  <aside class="panel" id="panel-right">
+    <div class="panel__header">Tasks &amp; Control</div>
+
+    <div class="panel__section">
+      <div class="panel__section-title">Quick Actions</div>
+      <div class="actions-row">
+        <button class="btn btn--primary" id="btn-new-task" title="Queue a new task">+ New Task</button>
+        <button class="btn btn--danger" id="btn-estop" title="Emergency stop">E‑Stop</button>
+        <button class="btn" id="btn-reset-estop" title="Reset emergency stop">Reset</button>
+      </div>
+    </div>
+
+    <div class="panel__section" id="task-input-section" style="display:none">
+      <div class="task-input-row">
+        <input type="text" id="task-objective" placeholder="Task objective…" autocomplete="off">
+        <button class="btn btn--primary btn--sm" id="btn-submit-task">Queue</button>
+        <button class="btn btn--sm" id="btn-cancel-input">Cancel</button>
+      </div>
+    </div>
+
+    <div class="panel__section">
+      <div class="panel__section-title">Tasks <span id="task-count" style="font-weight:400">(0)</span></div>
+      <div class="task-list" id="task-list">
+        <div class="empty-state">No tasks</div>
+      </div>
+    </div>
+
+    <div class="panel__section">
+      <div class="panel__section-title">Event Log</div>
+      <div class="event-log" id="event-log">
+        <div class="empty-state">Waiting for events…</div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Command Bar -->
+  <div class="command-bar">
+    <span class="prompt">&#x203A;</span>
+    <input type="text" id="command-input" placeholder="Type a command or task objective…" autocomplete="off">
+    <span style="font-size:0.6rem;color:var(--text-faint)">Enter to queue</span>
+  </div>
+
+</main>
+
+<script>
+// ── State ──────────────────────────────────────────────
+const STAGES = ['PERCEIVE', 'DECIDE', 'SELECT', 'VALIDATE', 'EXECUTE', 'OBSERVE', 'REFLECT', 'FINISH'];
+let currentStage = -1;
+let eventLog = [];
+const MAX_EVENTS = 50;
+
+// ── Pipeline Rendering ─────────────────────────────────
+function buildPipeline() {
+  const container = document.getElementById('pipeline');
+  container.innerHTML = STAGES.map((name, i) => {
+    const isLast = i === STAGES.length - 1;
+    const short = name.slice(0, 4);
+    return `
+      <div class="pipeline-stage" id="stage-${i}">
+        <div class="pipeline-stage__node">${short}</div>
+        <div class="pipeline-stage__label">${name.toLowerCase()}</div>
+        ${isLast ? '' : '<div class="pipeline-stage__connector" style="margin-left:18px"></div>'}
+      </div>
+    `;
+  }).join('');
+}
+
+function updatePipeline(activeIdx) {
+  for (let i = 0; i < STAGES.length; i++) {
+    const el = document.getElementById(`stage-${i}`);
+    if (!el) continue;
+    el.classList.remove('pipeline-stage--active', 'pipeline-stage--done');
+    if (i === activeIdx) {
+      el.classList.add('pipeline-stage--active');
+    } else if (i < activeIdx) {
+      el.classList.add('pipeline-stage--done');
+    }
+  }
+}
+
+// ── Formatting Helpers ─────────────────────────────────
+function fmt(v, decimals = 1) {
+  if (v == null) return '--';
+  return Number(v).toFixed(decimals);
+}
+
+function batteryColor(pct) {
+  if (pct < 15) return 'var(--danger)';
+  if (pct < 30) return 'var(--warning)';
+  return 'var(--success)';
+}
+
+function statusClass(status) {
+  const map = {
+    running: 'task-item__status--running',
+    queued: 'task-item__status--queued',
+    completed: 'task-item__status--completed',
+    failed: 'task-item__status--failed',
+    paused: 'task-item__status--paused',
+    awaiting_confirmation: 'task-item__status--paused',
+    cancelled: 'task-item__status--cancelled',
+  };
+  return map[status] || 'task-item__status--queued';
+}
+
+// ── Render Functions ───────────────────────────────────
+function renderWorld(world) {
+  document.getElementById('pos-x').textContent = fmt(world.position?.x);
+  document.getElementById('pos-y').textContent = fmt(world.position?.y);
+  document.getElementById('heading').textContent = fmt(world.heading_degrees) + '°';
+
+  const bat = world.battery_level ?? 0;
+  document.getElementById('battery').textContent = fmt(bat) + '%';
+  document.getElementById('battery-header').textContent = fmt(bat) + '%';
+  const fill = document.getElementById('battery-fill');
+  fill.style.width = Math.max(0, Math.min(100, bat)) + '%';
+  fill.style.background = batteryColor(bat);
+
+  const estopActive = world.estop_active;
+  const estopItem = document.getElementById('estop-item');
+  const estopVal = document.getElementById('estop');
+  if (estopActive) {
+    estopItem.className = 'telemetry-item telemetry-item--danger';
+    estopVal.innerHTML = '<span class="estop-badge">ACTIVE</span>';
+  } else {
+    estopItem.className = 'telemetry-item';
+    estopVal.textContent = 'clear';
+  }
+
+  const ss = world.robot_self_state;
+  document.getElementById('sport-mode').textContent = ss?.sport_mode ?? '--';
+  document.getElementById('error-code').textContent = ss?.error_code ?? '--';
+
+  const ecItem = document.getElementById('error-code').parentElement;
+  if (ss?.error_code != null && ss.error_code !== 0) {
+    ecItem.className = 'telemetry-item telemetry-item--danger';
+  } else {
+    ecItem.className = 'telemetry-item';
+  }
+
+  if (ss?.velocity) {
+    document.getElementById('velocity').textContent =
+      `${fmt(ss.velocity.vx)} / ${fmt(ss.velocity.vy)} / ${fmt(ss.velocity.vz)} m/s`;
+  } else {
+    document.getElementById('velocity').textContent = '--';
+  }
+
+  if (ss?.imu_rpy) {
+    document.getElementById('imu').textContent =
+      `${fmt(ss.imu_rpy.roll_deg)}° / ${fmt(ss.imu_rpy.pitch_deg)}° / ${fmt(ss.imu_rpy.yaw_deg)}°`;
+  } else {
+    document.getElementById('imu').textContent = '--';
+  }
+
+  document.getElementById('standing').textContent = ss?.is_standing == null ? '--' : (ss.is_standing ? 'yes' : 'no');
+  document.getElementById('moving').textContent = ss?.is_moving == null ? '--' : (ss.is_moving ? 'yes' : 'no');
+  document.getElementById('state-age').textContent = ss?.state_age_seconds != null ? fmt(ss.state_age_seconds, 2) + 's' : '--';
+
+  const alerts = world.alerts || [];
+  const alertsSection = document.getElementById('alerts-section');
+  const alertsList = document.getElementById('alerts-list');
+  if (alerts.length > 0) {
+    alertsSection.style.display = '';
+    alertsList.innerHTML = alerts.map(a => {
+      const isCritical = /estop|critical|emergency/i.test(a);
+      return `<div class="alert-item${isCritical ? ' alert-item--critical' : ''}">${escapeHtml(a)}</div>`;
+    }).join('');
+  } else {
+    alertsSection.style.display = 'none';
+    alertsList.innerHTML = '';
+  }
+
+  const objects = world.known_objects ? Object.values(world.known_objects) : [];
+  const objList = document.getElementById('objects-list');
+  if (objects.length > 0) {
+    objList.innerHTML = objects.map(o => `
+      <div class="object-item">
+        <span class="object-item__kind">${escapeHtml(o.kind || 'unknown')}</span>
+        <span>${escapeHtml(o.object_id || '--')}</span>
+        <span class="object-item__confidence">${(o.confidence * 100).toFixed(0)}%</span>
+      </div>
+    `).join('');
+  } else {
+    objList.innerHTML = '<div class="empty-state">No objects detected</div>';
+  }
+}
+
+function renderTasks(tasks) {
+  const list = document.getElementById('task-list');
+  const count = document.getElementById('task-count');
+  const t = tasks || [];
+  count.textContent = `(${t.length})`;
+
+  if (t.length === 0) {
+    list.innerHTML = '<div class="empty-state">No tasks</div>';
+    return;
+  }
+
+  list.innerHTML = t.map(task => `
+    <div class="task-item" title="ID: ${escapeHtml(task.task_id)}&#10;Source: ${escapeHtml(task.source)}&#10;Message: ${escapeHtml(task.last_message || '')}">
+      <span class="task-item__status ${statusClass(task.status)}"></span>
+      <span class="task-item__objective">${escapeHtml(task.objective)}</span>
+      <span class="task-item__meta">P${task.priority} · ${task.attempts}/${task.max_attempts}</span>
+    </div>
+  `).join('');
+}
+
+function renderService(svc) {
+  const dot = document.getElementById('service-status-dot');
+  if (svc?.running) {
+    dot.className = 'status-dot status-dot--online status-dot--pulse';
+    dot.title = 'Service running';
+  } else {
+    dot.className = 'status-dot status-dot--danger';
+    dot.title = 'Service stopped';
+  }
+}
+
+function renderLastResult(result) {
+  const el = document.getElementById('last-result');
+  if (!result) { el.textContent = 'No activity yet'; return; }
+  const status = result.status || 'idle';
+  const action = result.action_taken || '—';
+  el.textContent = `Last: ${status} · ${action}`;
+  el.title = JSON.stringify(result, null, 2);
+}
+
+function addEvent(type, msg, important) {
+  const now = new Date();
+  const time = now.toLocaleTimeString('en-US', { hour12: false });
+  eventLog.unshift({ time, type, msg, important });
+  if (eventLog.length > MAX_EVENTS) eventLog.length = MAX_EVENTS;
+
+  const log = document.getElementById('event-log');
+  log.innerHTML = eventLog.map(e => `
+    <div class="event-log__item${e.important ? ' event-log__item--important' : ''}">
+      <span class="event-log__time">${e.time}</span>
+      <span class="event-log__type">${escapeHtml(e.type)}</span>
+      <span class="event-log__msg">${escapeHtml(e.msg)}</span>
+    </div>
+  `).join('');
+}
+
+function escapeHtml(str) {
+  if (!str) return '';
+  const div = document.createElement('div');
+  div.textContent = String(str);
+  return div.innerHTML;
+}
+
+function stageFromEventType(type) {
+  const map = {
+    'scheduler_result': 5, 'task_queued': 2, 'task_cancelled': 2,
+    'task_confirmation': 4, 'event_handled': 3, 'estop_reset': 6,
+    'service_started': 0, 'service_stopped': 7, 'scheduler_error': 5,
+  };
+  return map[type] ?? -1;
+}
+
+function renderAll(status) {
+  if (status.world) renderWorld(status.world);
+  if (status.tasks != null) renderTasks(status.tasks);
+  if (status.service) renderService(status.service);
+  if (status.last_result != null) renderLastResult(status.last_result);
+}
+
+// ── WebSocket ──────────────────────────────────────────
+function connectWS() {
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  const ws = new WebSocket(`${proto}://${location.host}/ws`);
+  const indicator = document.getElementById('ws-indicator');
+  const wsText = document.getElementById('ws-text');
+
+  ws.addEventListener('open', () => {
+    indicator.classList.add('ws-indicator--live');
+    wsText.textContent = 'live';
+    addEvent('system', 'WebSocket connected', false);
+  });
+
+  ws.addEventListener('message', (event) => {
+    try {
+      const msg = JSON.parse(event.data);
+      if (msg.status) renderAll(msg.status);
+      if (msg.type) {
+        const stage = stageFromEventType(msg.type);
+        if (stage >= 0) { currentStage = stage; updatePipeline(currentStage); }
+        if (msg.type !== 'status') {
+          const desc = msg.task?.objective || msg.event?.message || msg.message || '';
+          addEvent(msg.type, desc, msg.type === 'scheduler_error' || msg.type === 'estop_reset');
+        }
+      }
+    } catch (e) { /* ignore malformed */ }
+  });
+
+  ws.addEventListener('close', () => {
+    indicator.classList.remove('ws-indicator--live');
+    wsText.textContent = 'offline';
+    addEvent('system', 'WebSocket disconnected', true);
+    setTimeout(connectWS, 3000);
+  });
+
+  ws.addEventListener('error', () => { ws.close(); });
+}
+
+// ── API Calls ──────────────────────────────────────────
+async function apiFetch(url, options = {}) {
+  const res = await fetch(url, {
+    headers: { 'Content-Type': 'application/json' },
+    ...options,
+  });
+  if (!res.ok) { const text = await res.text(); throw new Error(`${res.status}: ${text}`); }
+  return res.json();
+}
+
+async function refreshStatus() {
+  try { renderAll(await apiFetch('/api/status')); } catch (e) { console.warn('Status fetch failed:', e.message); }
+}
+
+async function queueTask(objective, priority = 0) {
+  await apiFetch('/api/tasks', { method:'POST', body:JSON.stringify({ objective, priority }) });
+  addEvent('task_queued', objective, true);
+  currentStage = 2; updatePipeline(currentStage);
+  await refreshStatus();
+}
+
+async function sendEstop() {
+  await apiFetch('/api/events', { method:'POST', body:JSON.stringify({ type:'interrupt', message:'dashboard emergency stop' }) });
+  addEvent('interrupt', 'Emergency stop triggered', true);
+  await refreshStatus();
+}
+
+async function resetEstop() {
+  await apiFetch('/api/estop/reset', { method:'POST' });
+  addEvent('estop_reset', 'Emergency stop reset', true);
+  currentStage = 6; updatePipeline(currentStage);
+  await refreshStatus();
+}
+
+// ── Event Handlers ─────────────────────────────────────
+document.getElementById('btn-estop').addEventListener('click', sendEstop);
+document.getElementById('btn-reset-estop').addEventListener('click', resetEstop);
+
+document.getElementById('btn-new-task').addEventListener('click', () => {
+  const sec = document.getElementById('task-input-section');
+  sec.style.display = sec.style.display === 'none' ? '' : 'none';
+  if (sec.style.display !== 'none') document.getElementById('task-objective').focus();
+});
+
+document.getElementById('btn-cancel-input').addEventListener('click', () => {
+  document.getElementById('task-input-section').style.display = 'none';
+  document.getElementById('task-objective').value = '';
+});
+
+document.getElementById('btn-submit-task').addEventListener('click', async () => {
+  const input = document.getElementById('task-objective');
+  const val = input.value.trim(); if (!val) return;
+  await queueTask(val); input.value = '';
+  document.getElementById('task-input-section').style.display = 'none';
+});
+
+document.getElementById('task-objective').addEventListener('keydown', async (e) => {
+  if (e.key === 'Enter') {
+    const val = e.target.value.trim(); if (!val) return;
+    await queueTask(val); e.target.value = '';
+    document.getElementById('task-input-section').style.display = 'none';
+  }
+  if (e.key === 'Escape') {
+    e.target.value = '';
+    document.getElementById('task-input-section').style.display = 'none';
+  }
+});
+
+// Command bar
+document.getElementById('command-input').addEventListener('keydown', async (e) => {
+  if (e.key === 'Enter') {
+    const val = e.target.value.trim(); if (!val) return;
+    if (val.toLowerCase() === 'estop') await sendEstop();
+    else if (val.toLowerCase() === 'reset') await resetEstop();
+    else await queueTask(val);
+    e.target.value = '';
+  }
+});
+
+// Keyboard: Escape = E-Stop (only when no input focused)
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && document.activeElement === document.body) sendEstop();
+});
+
+// ── Init ───────────────────────────────────────────────
+buildPipeline();
+updatePipeline(-1);
+connectWS();
+refreshStatus();
+addEvent('system', 'Console initialized', false);
+</script>
+</body>
+</html>

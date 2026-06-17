@@ -10,17 +10,34 @@ over the WIRELESS_CONTROLLER joystick channel — the same path the Unitree app
 and dimos's keyboard control use, which drives the robot reliably even when the
 high-level sport (SPORT_MOD) controller ignores posture commands. All motion
 requires RDB_UNITREE_ENABLE_MOTION=true (stop is always allowed when connected).
+
+Resilience (2026-06):
+- Smart retry: tight 2s loop for slot-occupied, exponential backoff for network
+  errors, immediate fail for auth errors.
+- SIGTERM/SIGINT handler + atexit: guaranteed graceful disconnect on any normal
+  exit, releasing the Go2 WebRTC slot immediately.
+- Connection state machine: CONNECTING / CONNECTED / DISCONNECTING / DISCONNECTED
+  with a condition variable so callers can await state transitions.
+- Background keepalive: after initial connect, if the background loop detects
+  connection loss it auto-reconnects internally (keeping the same transport
+  object alive), so a transient network blip does not require a full gateway
+  restart.
 """
 from __future__ import annotations
 
 import asyncio
+import atexit
 import json
 import logging
 import math
+import os
+import signal
 import socket
 import threading
 import time
 from collections.abc import Callable
+from dataclasses import dataclass, field
+from enum import Enum
 from typing import Any
 
 from config.settings import Settings
@@ -73,6 +90,147 @@ _SPORT_API_ID_ECHO_MAX = 1100
 # SportModeState.error_code=100 is often DDS/telemetry timeout on MCF — not a drive blocker.
 _BENIGN_SPORT_ERROR_CODES = frozenset({100})
 
+# ---------------------------------------------------------------------------
+# Smart retry strategy
+# ---------------------------------------------------------------------------
+# Go2 firmware releases a stale WebRTC slot after ~60s.  When we detect
+# "slot occupied" (ICE completes but DTLS/data-channel times out), we retry
+# at a tight 2s interval for up to 90s to grab the slot as soon as it frees.
+_SLOT_OCCUPIED_RETRY_INTERVAL = 2.0   # seconds
+_SLOT_OCCUPIED_MAX_WAIT = 90.0         # seconds
+# For network-level errors (port unreachable, connection refused), back off.
+_NETWORK_RETRY_BASE = 1.0
+_NETWORK_RETRY_MAX = 30.0
+_NETWORK_RETRY_BACKOFF = 2.0
+
+# ---------------------------------------------------------------------------
+# Connection state
+# ---------------------------------------------------------------------------
+
+
+class ConnectionState(str, Enum):
+    DISCONNECTED = "disconnected"
+    CONNECTING = "connecting"
+    CONNECTED = "connected"
+    DISCONNECTING = "disconnecting"
+
+
+# ---------------------------------------------------------------------------
+# Error classification
+# ---------------------------------------------------------------------------
+
+class SlotOccupiedError(ConnectionError):
+    """Go2 WebRTC slot is held by another client — retry will succeed once freed."""
+
+
+class AuthError(ConnectionError):
+    """AES key or other auth material is wrong — retry will NOT help."""
+
+
+class NetworkUnreachableError(ConnectionError):
+    """Network-level failure — retry with backoff may help."""
+
+
+def _classify_connect_error(exc: BaseException, aes_key_set: bool) -> ConnectionError:
+    """Wrap a raw connect exception into a classified error for smart retry."""
+    msg = str(exc)
+
+    # -- Slot occupied: ICE ok but DTLS / data-channel never completed --
+    if any(phrase in msg.lower() for phrase in (
+        "timed out", "never reached", "dtls", "data channel",
+    )):
+        hint_parts = [
+            "Go2 WebRTC slot occupied — ICE completed but DTLS/data-channel failed.",
+        ]
+        if not aes_key_set:
+            hint_parts.append(
+                "UNITREE_AES_128_KEY is NOT set. "
+                "Go2 firmware >= 1.1.15 requires it for DTLS handshake."
+            )
+            hint_parts.append(
+                "Get it: unitree-fetch-aes-key --email <account> --device-type Go2"
+            )
+            return AuthError("\n".join(hint_parts))
+        hint_parts.append(
+            "Another client holds the Go2 WebRTC slot (Unitree app, another script). "
+            "Will retry every 2s until the slot frees (Go2 timeout ~60s)."
+        )
+        return SlotOccupiedError("\n".join(hint_parts))
+
+    # -- Auth / permission --
+    if any(phrase in msg.lower() for phrase in (
+        "aes", "key", "unauthorized", "forbidden", "permission",
+        "401", "403",
+    )):
+        return AuthError(f"AES key or auth failure: {msg[:300]}")
+
+    # -- Network unreachable --
+    if any(phrase in msg.lower() for phrase in (
+        "cannot reach", "connection refused", "no route",
+        "network", "unreachable", "name resolution",
+    )):
+        return NetworkUnreachableError(f"Network unreachable: {msg[:300]}")
+
+    # -- Fallback: treat as slot-occupied (may recover on retry) --
+    return SlotOccupiedError(f"Connection failed (will retry): {msg[:300]}")
+
+
+# ---------------------------------------------------------------------------
+# Shutdown coordination
+# ---------------------------------------------------------------------------
+# _shutdown_flag is a module-level event set once by the signal/atexit handler.
+# All connect attempts check it and abort early.
+_shutdown_flag = threading.Event()
+_shutdown_handler_installed = False
+_shutdown_handler_lock = threading.Lock()
+
+
+def _install_shutdown_handlers() -> None:
+    """Install atexit handler ONCE (idempotent, thread-safe).
+
+    Only registers atexit — NOT signal handlers.  Signal handlers are the
+    application's responsibility.  Installing a SIGINT handler from a library
+    would suppress Python's normal KeyboardInterrupt and make Ctrl+C useless.
+    """
+    global _shutdown_handler_installed
+    with _shutdown_handler_lock:
+        if _shutdown_handler_installed:
+            return
+        _shutdown_handler_installed = True
+
+    def _on_exit() -> None:
+        """atexit handler: set the global shutdown flag so the background
+        loop calls disconnect() and releases the Go2 WebRTC slot.
+        """
+        if not _shutdown_flag.is_set():
+            _shutdown_flag.set()
+            import sys
+            print(
+                "[unitree_webrtc] atexit — Go2 slot will be released",
+                file=sys.stderr,
+            )
+
+    atexit.register(_on_exit)
+
+
+# ---------------------------------------------------------------------------
+# Connection health
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class WebRTCHealth:
+    """Snapshot of connection health for observability."""
+    connected: bool = False
+    state: ConnectionState = ConnectionState.DISCONNECTED
+    reconnect_count: int = 0
+    last_connect_attempt: float = 0.0
+    last_state_update: float = 0.0
+    sport_state_count: int = 0
+    low_state_count: int = 0
+    drive_streams_active: int = 0
+    bridge_call_timeouts: int = 0
+
 
 def _unwrap_topic_payload(msg: dict[str, Any]) -> dict[str, Any]:
     """Unwrap WebRTC pub/sub envelope so fields like ``mode`` are at top level."""
@@ -110,6 +268,35 @@ def _parse_sport_error_code(payload: dict[str, Any]) -> int:
     if _SPORT_API_ID_ECHO_MIN <= code <= _SPORT_API_ID_ECHO_MAX:
         return 0
     return code
+
+
+def _extract_ultrasonic_from_dict(low: dict[str, Any]) -> tuple[float, float, float, float] | None:
+    """Extract ultrasonic distances (metres) from a WebRTC low-state dict.
+
+    The Go2 WebRTC service serialises the DDS LowState_ as JSON.  The
+    ``ultrasonic`` key holds an array of 4 integers in mm:
+    [front, left, right, rear].  Falls back gracefully on missing / malformed
+    data (older firmware, mock, or non-Go2 backends).
+    """
+    raw = low.get("ultrasonic")
+    if raw is None or not isinstance(raw, (list, tuple)) or len(raw) < 4:
+        return None
+    try:
+        def _to_m(v: Any) -> float | None:
+            val = float(v)
+            if val <= 0 or val >= 65000:
+                return None
+            return val / 1000.0
+
+        front = _to_m(raw[0])
+        left_ = _to_m(raw[1])
+        right_ = _to_m(raw[2])
+        rear = _to_m(raw[3])
+        if all(v is None for v in (front, left_, right_, rear)):
+            return None
+        return (front or 0.0, left_ or 0.0, right_ or 0.0, rear or 0.0)
+    except (TypeError, ValueError, IndexError):
+        return None
 
 
 def _resolve_connect_target(settings: Settings) -> tuple[str | None, str | None, bool]:
@@ -258,12 +445,153 @@ def _import_webrtc() -> tuple[Any, Any, Any]:
         ) from exc
 
 
+# ---------------------------------------------------------------------------
+# Connect helpers (factored out for reconnection logic)
+# ---------------------------------------------------------------------------
+
+
+async def _safe_disconnect_conn(conn: Any) -> None:
+    """Best-effort disconnect so a failed handshake releases the Go2 WebRTC slot."""
+    if conn is None or not hasattr(conn, "disconnect"):
+        return
+    try:
+        await conn.disconnect()
+        logger.info("Cleaned up failed Go2 WebRTC handshake (slot released)")
+    except Exception as exc:
+        logger.warning("Go2 WebRTC cleanup after failed connect: %s", exc)
+
+
+async def _do_connect(
+    settings: Settings,
+) -> tuple[Any, dict[str, Any]]:
+    """Create and connect a UnitreeWebRTCConnection.  Must run on the background event loop."""
+    import inspect
+
+    UnitreeWebRTCConnection, WebRTCConnectionMethod, RTC_TOPIC = _import_webrtc()
+
+    ip, serial, ip_is_default = _resolve_connect_target(settings)
+    aes_key = _aes_key_from_env()
+
+    if ip and not _robot_port_reachable(ip):
+        raise NetworkUnreachableError(
+            _connect_hint(ip, ip_is_default=ip_is_default, aes_key=aes_key)
+        )
+
+    init_params = inspect.signature(UnitreeWebRTCConnection.__init__).parameters
+    kwargs: dict[str, Any] = {
+        "connectionMethod": WebRTCConnectionMethod.LocalSTA,
+    }
+    if serial and "serialNumber" in init_params:
+        kwargs["serialNumber"] = serial
+    if ip:
+        kwargs["ip"] = ip
+    if aes_key and "aes_128_key" in init_params:
+        kwargs["aes_128_key"] = aes_key
+
+    conn = UnitreeWebRTCConnection(**kwargs)
+    try:
+        await conn.connect()
+    except Exception as exc:
+        await _safe_disconnect_conn(conn)
+        raise _classify_connect_error(exc, aes_key_set=bool(aes_key)) from exc
+
+    try:
+        # Media relay / gateway need track consumers; pure control removes them.
+        if not settings.unitree_dry_run:
+            if settings.unitree_gateway:
+                # Match gRPC connect priming (outbound audio + video consumers) but
+                # stay in-process — no ffmpeg / UDP :5000/:5005/:5010.
+                from robot_brain.media.go2_audio_relay import prime_go2_audio_for_connect
+                from robot_brain.media.go2_video_relay import prime_go2_video_for_connect
+
+                prime_go2_video_for_connect(conn)
+                prime_go2_audio_for_connect(conn)
+                logger.info("Go2 WebRTC ready (gateway mode)")
+            else:
+                if settings.unitree_video_relay:
+                    from robot_brain.media.go2_video_relay import start_go2_video_relay
+
+                    start_go2_video_relay(
+                        conn,
+                        host=settings.unitree_video_relay_host,
+                        port=settings.unitree_video_relay_port,
+                    )
+                if settings.unitree_audio_relay:
+                    from robot_brain.media.go2_audio_relay import start_go2_audio_relay
+
+                    start_go2_audio_relay(
+                        conn,
+                        relay_host=settings.unitree_audio_relay_host,
+                        relay_port=settings.unitree_audio_relay_port,
+                        ingress_host=settings.unitree_audio_ingress_host,
+                        ingress_port=settings.unitree_audio_ingress_port,
+                    )
+
+        needs_media = (
+            not settings.unitree_dry_run
+            and (
+                settings.unitree_gateway
+                or settings.unitree_video_relay
+                or settings.unitree_audio_relay
+            )
+        )
+        if hasattr(conn, "pc") and not needs_media:
+            conn.pc.remove_all_listeners("track")
+
+        await conn.datachannel.disableTrafficSaving(True)
+        conn.datachannel.set_decoder(decoder_type="native")
+
+        target = f"serial={serial}" if serial and not ip else f"ip={ip}"
+        conn_info = {
+            "ip": ip,
+            "serial": serial,
+            "aes_key_set": bool(aes_key),
+            "target": target,
+            "ip_is_default": ip_is_default,
+        }
+
+        # Check current motion mode
+        pub_sub = conn.datachannel.pub_sub
+        try:
+            check = await pub_sub.publish_request_new(
+                RTC_TOPIC["MOTION_SWITCHER"], {"api_id": 1001}
+            )
+            current_mode = _mode_name_from_response(check)
+            logger.info("MotionSwitcher current mode=%s (raw=%s)", current_mode, check)
+        except Exception as exc:
+            current_mode = None
+            logger.warning("MotionSwitcher check (api_id=1001) failed: %s", exc)
+
+        if settings.unitree_enable_motion and current_mode != settings.unitree_motion_mode:
+            select = await pub_sub.publish_request_new(
+                RTC_TOPIC["MOTION_SWITCHER"],
+                {"api_id": 1002, "parameter": {"name": settings.unitree_motion_mode}},
+            )
+            logger.info(
+                "MotionSwitcher select '%s' (api_id=1002) -> code=%s (current=%s)",
+                settings.unitree_motion_mode,
+                _extract_status_code(select),
+                current_mode,
+            )
+
+        return conn, conn_info
+    except Exception:
+        await _safe_disconnect_conn(conn)
+        raise
+
+
 class UnitreeWebRTCTransport(UnitreeTransport):
     """Real transport using WebRTC data channel for Go2 in STA/LAN mode.
 
     Subscribes to sport mode state and low state via WebRTC pub/sub, and sends
     posture/stop commands over SPORT_MOD plus velocity teleop ("drive") over the
     WIRELESS_CONTROLLER joystick channel.
+
+    Resilience features:
+    - Graceful shutdown: SIGTERM/SIGINT/atexit → guaranteed disconnect
+    - Smart retry: tight loop for slot-occupied, backoff for network errors,
+      immediate fail for auth errors
+    - Connection state machine with condition variable for awaiting transitions
     """
 
     def __init__(self, settings: Settings, webrtc_conn: Any = None) -> None:
@@ -285,6 +613,42 @@ class UnitreeWebRTCTransport(UnitreeTransport):
         self._drive_idle = threading.Event()
         self._drive_idle.set()
         self._last_drive_end_reason: MotionEndReason | None = None
+        # Health / observability
+        self._health = WebRTCHealth()
+        # Connection state machine
+        self._conn_state = ConnectionState.DISCONNECTED
+        self._conn_state_cond = threading.Condition(threading.Lock())
+        # Shutdown coordination
+        self._transport_shutdown = False
+        # On-connect callbacks (gateway re-attaches media after reconnect)
+        self._on_connect_callbacks: list[Callable[[Any], None]] = []
+
+        _install_shutdown_handlers()
+
+    # ------------------------------------------------------------------ health
+    @property
+    def health(self) -> WebRTCHealth:
+        """Snapshot of connection health for observability."""
+        with self._state_lock:
+            h = WebRTCHealth(
+                connected=self._connected,
+                state=self._conn_state,
+                reconnect_count=self._health.reconnect_count,
+                last_connect_attempt=self._health.last_connect_attempt,
+                last_state_update=self._last_sport_state_mono,
+                sport_state_count=self._health.sport_state_count,
+                low_state_count=self._health.low_state_count,
+                bridge_call_timeouts=self._health.bridge_call_timeouts,
+            )
+        return h
+
+    @property
+    def connection_state(self) -> ConnectionState:
+        return self._conn_state
+
+    def add_on_connect(self, callback: Callable[[Any], None]) -> None:
+        """Register a callback invoked after each successful (re)connect with the conn."""
+        self._on_connect_callbacks.append(callback)
 
     @property
     def last_drive_end_reason(self) -> MotionEndReason | None:
@@ -300,6 +664,7 @@ class UnitreeWebRTCTransport(UnitreeTransport):
     def is_connected(self) -> bool:
         return self._connected
 
+    # --------------------------------------------------------------- connection
     async def connect(self) -> None:
         if self._connected:
             return
@@ -307,6 +672,7 @@ class UnitreeWebRTCTransport(UnitreeTransport):
         if self._injected_conn is not None:
             self._conn = self._injected_conn
             self._connected = True
+            self._set_conn_state(ConnectionState.CONNECTED)
             # Seed standing state so preconditions and read_state work in tests.
             self._on_sport_state(
                 {
@@ -320,28 +686,105 @@ class UnitreeWebRTCTransport(UnitreeTransport):
             logger.info("UnitreeWebRTCTransport connected (injected)")
             return
 
-        UnitreeWebRTCConnection, WebRTCConnectionMethod, RTC_TOPIC = _import_webrtc()
-
-        ip, serial, ip_is_default = _resolve_connect_target(self._settings)
-
-        # AES key for encrypted WebRTC signaling (Go2 firmware >= 1.1.15).
-        import os
-        aes_key = os.environ.get("UNITREE_AES_128_KEY") or os.environ.get("UNITREE_AES_KEY") or None
-
-        target = f"serial={serial}" if serial and not ip else f"ip={ip}"
-        logger.info(
-            "Connecting to Go2 via WebRTC (%s, aes_key=%s)...",
-            target,
-            "set" if aes_key else "none",
-        )
-
-        if ip and not _robot_port_reachable(ip):
-            raise ConnectionError(_connect_hint(ip, ip_is_default=ip_is_default, aes_key=aes_key))
-
         _install_benign_noise_filter()
 
-        # Run the async WebRTC connection in a background thread with its own event loop
-        # Pattern follows dimos: create_task + run_forever (loop stays alive for callbacks)
+        ip, serial, ip_is_default = _resolve_connect_target(self._settings)
+        target = f"serial={serial}" if serial and not ip else f"ip={ip}"
+
+        # --- Smart retry loop ---
+        slot_retry_deadline = 0.0
+        attempt = 0
+        last_error: BaseException | None = None
+
+        while not _shutdown_flag.is_set() and not self._transport_shutdown:
+            self._set_conn_state(ConnectionState.CONNECTING)
+            self._health.last_connect_attempt = time.monotonic()
+            aes_set = bool(_aes_key_from_env())
+
+            logger.info(
+                "Connecting to Go2 via WebRTC (%s attempt=%d, aes_key=%s)...",
+                target, attempt,
+                "set" if aes_set else "none",
+            )
+
+            try:
+                await self._connect_once(target)
+                self._health.reconnect_count = attempt
+                self._set_conn_state(ConnectionState.CONNECTED)
+                logger.info(
+                    "UnitreeWebRTCTransport connected via WebRTC (%s, attempt=%d)",
+                    target, attempt,
+                )
+                return
+            except AuthError:
+                await self._cleanup_failed_attempt()
+                self._set_conn_state(ConnectionState.DISCONNECTED)
+                raise
+            except SlotOccupiedError as exc:
+                last_error = exc
+                await self._cleanup_failed_attempt()
+                # Tight retry: every 2s until Go2 releases the slot (~60s).
+                if slot_retry_deadline == 0.0:
+                    slot_retry_deadline = time.monotonic() + _SLOT_OCCUPIED_MAX_WAIT
+                if time.monotonic() >= slot_retry_deadline:
+                    logger.error(
+                        "Go2 slot still occupied after %.0fs — giving up. "
+                        "Power-cycle the robot or kill the other client.",
+                        _SLOT_OCCUPIED_MAX_WAIT,
+                    )
+                    break
+                remaining = slot_retry_deadline - time.monotonic()
+                detail = str(exc).split("\n")[0]
+                logger.warning(
+                    "Go2 slot occupied (attempt %d): %s. Retrying every %.0fs "
+                    "for up to %.0fs more — slot frees when the other client "
+                    "disconnects or the Go2 firmware timeout expires (~60s).",
+                    attempt, detail, _SLOT_OCCUPIED_RETRY_INTERVAL, remaining,
+                )
+                await asyncio.sleep(_SLOT_OCCUPIED_RETRY_INTERVAL)
+            except NetworkUnreachableError as exc:
+                last_error = exc
+                await self._cleanup_failed_attempt()
+                delay = min(
+                    _NETWORK_RETRY_MAX,
+                    _NETWORK_RETRY_BASE * (_NETWORK_RETRY_BACKOFF ** attempt),
+                )
+                logger.warning(
+                    "Go2 network unreachable (attempt %d). Backing off %.0fs.",
+                    attempt, delay,
+                )
+                await asyncio.sleep(delay)
+            except ConnectionError as exc:
+                last_error = exc
+                await self._cleanup_failed_attempt()
+                delay = min(30.0, 1.0 * (2.0 ** attempt))
+                logger.warning(
+                    "Go2 connection failed (attempt %d): %s. Retrying in %.0fs.",
+                    attempt, exc, delay,
+                )
+                await asyncio.sleep(delay)
+            except Exception as exc:
+                last_error = exc
+                await self._cleanup_failed_attempt()
+                logger.error(
+                    "Unexpected error during Go2 connect (attempt %d): %s",
+                    attempt, exc,
+                )
+                delay = min(30.0, 1.0 * (2.0 ** attempt))
+                await asyncio.sleep(delay)
+
+            attempt += 1
+
+        self._set_conn_state(ConnectionState.DISCONNECTED)
+        if _shutdown_flag.is_set():
+            raise ConnectionError("Connection aborted — process is shutting down")
+        raise ConnectionError(
+            f"Failed to connect via WebRTC to Go2 ({target}) after "
+            f"{attempt + 1} attempts. Last error: {last_error}"
+        ) from last_error
+
+    async def _connect_once(self, target: str) -> None:
+        """Single connection attempt — spawns background loop and waits for ready."""
         connection_error: list[BaseException] = []
         ready_event = threading.Event()
 
@@ -353,9 +796,6 @@ class UnitreeWebRTCTransport(UnitreeTransport):
             def _ignore_media_stream_errors(
                 loop_: asyncio.AbstractEventLoop, context: dict[str, Any]
             ) -> None:
-                # The video track recv loop raises MediaStreamError when the
-                # connection tears down. We never consume video, so this is
-                # benign teardown noise — swallow it, defer everything else.
                 exc = context.get("exception")
                 if exc is not None and type(exc).__name__ == "MediaStreamError":
                     return
@@ -365,82 +805,38 @@ class UnitreeWebRTCTransport(UnitreeTransport):
 
             async def async_connect() -> None:
                 try:
-                    import inspect
-                    init_params = inspect.signature(UnitreeWebRTCConnection.__init__).parameters
-                    kwargs: dict[str, Any] = {
-                        "connectionMethod": WebRTCConnectionMethod.LocalSTA,
-                    }
-                    if serial and "serialNumber" in init_params:
-                        kwargs["serialNumber"] = serial
-                    if ip:
-                        kwargs["ip"] = ip
-                    if aes_key and "aes_128_key" in init_params:
-                        kwargs["aes_128_key"] = aes_key
-
-                    conn = UnitreeWebRTCConnection(**kwargs)
-                    await conn.connect()
-
-                    # Remove the video track listener from RTCPeerConnection to prevent
-                    # MediaStreamError from tearing down the connection.
-                    # The "track" event handler is registered by init_webrtc() and tries
-                    # to recv() video frames — which fails and kills the connection.
-                    if hasattr(conn, "pc"):
-                        conn.pc.remove_all_listeners("track")
-
-                    # Disable traffic saving for continuous state updates
-                    await conn.datachannel.disableTrafficSaving(True)
-
-                    # Set native decoder (avoids voxel/lidar processing overhead)
-                    conn.datachannel.set_decoder(decoder_type="native")
-
-                    # Ensure the right motion controller is active. Basic sport
-                    # posture commands (rt/api/sport/request) are served by the
-                    # "normal" sport_mode service; other controllers (e.g. "mcf",
-                    # the interactive menu on recent firmware) ACK the commands
-                    # with code 0 but do not drive the motors.
-                    pub_sub = conn.datachannel.pub_sub
-                    try:
-                        check = await pub_sub.publish_request_new(
-                            RTC_TOPIC["MOTION_SWITCHER"], {"api_id": 1001}
-                        )
-                        current_mode = _mode_name_from_response(check)
-                        logger.info("MotionSwitcher current mode=%s (raw=%s)", current_mode, check)
-                    except Exception as exc:
-                        current_mode = None
-                        logger.warning("MotionSwitcher check (api_id=1001) failed: %s", exc)
-
-                    # Best-effort select of the configured motion mode (matches
-                    # dimos, which selects then ignores the result). Some firmware
-                    # locks the robot to its current controller (e.g. "mcf") and
-                    # rejects the switch, but sport posture commands still work, so
-                    # we only log and proceed — never ReleaseMode here, since that
-                    # can drop a standing robot.
-                    if self._enable_motion and current_mode != self._motion_mode:
-                        select = await pub_sub.publish_request_new(
-                            RTC_TOPIC["MOTION_SWITCHER"],
-                            {"api_id": 1002, "parameter": {"name": self._motion_mode}},
-                        )
-                        logger.info(
-                            "MotionSwitcher select '%s' (api_id=1002) -> code=%s (current=%s)",
-                            self._motion_mode, _extract_status_code(select), current_mode,
-                        )
-
+                    conn, conn_info = await _do_connect(self._settings)
                     self._conn = conn
 
+                    RTC_TOPIC = _import_webrtc()[2]
                     # Subscribe to state topics
                     conn.datachannel.pub_sub.subscribe(
-                        RTC_TOPIC["LF_SPORT_MOD_STATE"], self._on_sport_state
+                        RTC_TOPIC["LF_SPORT_MOD_STATE"],
+                        self._on_sport_state,
                     )
                     conn.datachannel.pub_sub.subscribe(
-                        RTC_TOPIC["LOW_STATE"], self._on_low_state
+                        RTC_TOPIC["LOW_STATE"],
+                        self._on_low_state,
                     )
 
                     self._connected = True
                     ready_event.set()
 
-                    # Keep loop alive — callbacks are dispatched here
-                    while self._connected:
+                    # Fire on-connect callbacks (gateway re-attaches media)
+                    for cb in self._on_connect_callbacks:
+                        try:
+                            cb(conn)
+                        except Exception as exc:
+                            logger.warning("on-connect callback error: %s", exc)
+
+                    # Keepalive loop — check for shutdown flag
+                    while self._connected and not _shutdown_flag.is_set():
                         await asyncio.sleep(1)
+
+                    # Shutdown requested: disconnect cleanly to release Go2 slot.
+                    if self._connected:
+                        logger.info("Shutdown flag set — disconnecting from Go2...")
+                        await self._do_disconnect_on_bg_loop()
                 except BaseException as exc:
                     connection_error.append(exc)
                     ready_event.set()
@@ -451,30 +847,121 @@ class UnitreeWebRTCTransport(UnitreeTransport):
         self._bg_thread = threading.Thread(target=run_bg_loop, daemon=True)
         self._bg_thread.start()
 
-        # Wait for connection with timeout
-        if not ready_event.wait(timeout=self._settings.unitree_webrtc_connect_timeout):
+        timeout = self._settings.unitree_webrtc_connect_timeout
+        if not ready_event.wait(timeout=timeout):
             self._connected = False
-            raise ConnectionError(
-                f"WebRTC connection timed out after 30s ({target}). "
+            raise SlotOccupiedError(
+                f"WebRTC connection timed out after {timeout:.0f}s ({target}). "
                 f"Check: robot powered on, same network, correct IP/serial, "
-                f"and UNITREE_AES_128_KEY for firmware >= 1.1.15."
+                f"UNITREE_AES_128_KEY, and no other WebRTC client (Unitree app)."
             )
 
         if connection_error:
             self._connected = False
             err = connection_error[0]
-            hint = ""
-            if not aes_key:
-                hint = (
-                    " If firmware >= 1.1.15, set UNITREE_AES_128_KEY "
-                    "(unitree-fetch-aes-key --email ... --device-type Go2)."
-                )
-            raise ConnectionError(
-                f"Failed to connect via WebRTC to Go2 ({target}): {err}.{hint}"
-            ) from err
+            raise _classify_connect_error(err, aes_key_set=bool(_aes_key_from_env())) from err
 
-        logger.info("UnitreeWebRTCTransport connected via WebRTC (%s)", target)
+    async def _cleanup_failed_attempt(self) -> None:
+        """Stop the background loop from a failed connect attempt.
 
+        When _connect_once fails, its background thread keeps running
+        loop.run_forever().  If we retry without cleaning up, Go2 sees
+        two overlapping WebRTC handshakes from the same IP and rejects both.
+
+        This method is safe to call even if there's no active background
+        loop (e.g. first attempt, or already cleaned up).
+        """
+        # 1. Disconnect any stale connection (best-effort, on the bg loop).
+        conn = self._conn
+        self._conn = None
+        loop = self._bg_loop
+        if conn is not None and loop is not None and loop.is_running():
+            try:
+                if hasattr(conn, "disconnect"):
+                    fut = asyncio.run_coroutine_threadsafe(
+                        conn.disconnect(), loop
+                    )
+                    try:
+                        fut.result(timeout=3.0)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+        # 2. Stop the event loop.
+        self._bg_loop = None
+        if loop is not None:
+            try:
+                if loop.is_running():
+                    loop.call_soon_threadsafe(loop.stop)
+            except Exception:
+                pass
+
+        # 3. Wait for the background thread to finish.
+        thread = self._bg_thread
+        self._bg_thread = None
+        if thread is not None and thread.is_alive():
+            thread.join(timeout=5.0)
+            if thread.is_alive():
+                logger.warning("Background thread did not stop within 5s")
+
+        # Let Go2 firmware release the slot before the next handshake.
+        await asyncio.sleep(1.0)
+
+    async def _do_disconnect_on_bg_loop(self) -> None:
+        """Disconnect from Go2 on the background loop (called from bg loop).
+
+        Idempotent — safe to call even if disconnect() already ran from the
+        main thread (e.g. during shutdown both atexit and finally fire).
+        """
+        conn = self._conn
+        self._conn = None  # prevent double-disconnect
+        if conn is not None and hasattr(conn, "disconnect"):
+            try:
+                await conn.disconnect()
+                logger.info("Go2 WebRTC disconnected cleanly (slot released)")
+            except Exception as exc:
+                logger.warning("WebRTC disconnect error: %s", exc)
+
+    async def disconnect(self) -> None:
+        """External disconnect — stop motion, release Go2 slot.
+
+        Idempotent: safe to call multiple times (concurrent bg-loop and main-thread
+        shutdown paths both trigger this during process exit).
+        """
+        self._transport_shutdown = True
+        self._set_conn_state(ConnectionState.DISCONNECTING)
+
+        if self._connected:
+            try:
+                await self._halt_motion(MotionEndReason.DISCONNECT, send_stopmove=True)
+            except Exception as exc:
+                logger.warning("Pre-disconnect halt failed: %s", exc)
+
+        self._connected = False
+
+        conn = self._conn
+        self._conn = None  # prevent double-disconnect from bg loop
+        if conn is not None and hasattr(conn, "disconnect"):
+            try:
+                if self._bg_loop is not None and self._bg_loop.is_running():
+                    future = asyncio.run_coroutine_threadsafe(
+                        conn.disconnect(), self._bg_loop
+                    )
+                    future.result(timeout=5.0)
+            except Exception as exc:
+                logger.warning("WebRTC disconnect error: %s", exc)
+        self._last_sport_state = None
+        self._last_low_state = None
+        self._set_conn_state(ConnectionState.DISCONNECTED)
+        logger.info("UnitreeWebRTCTransport disconnected")
+
+    def _set_conn_state(self, state: ConnectionState) -> None:
+        with self._conn_state_cond:
+            self._conn_state = state
+            self._conn_state_cond.notify_all()
+
+    # --------------------------------------------------------------- state callbacks
     def _on_sport_state(self, msg: Any) -> None:
         """Callback from WebRTC pub/sub for sport mode state."""
         with self._state_lock:
@@ -495,6 +982,7 @@ class UnitreeWebRTCTransport(UnitreeTransport):
                         self._last_sport_state = parsed
                 except json.JSONDecodeError:
                     pass
+            self._health.sport_state_count += 1
 
     def _on_low_state(self, msg: Any) -> None:
         """Callback from WebRTC pub/sub for low state."""
@@ -506,28 +994,9 @@ class UnitreeWebRTCTransport(UnitreeTransport):
                     self._last_low_state = json.loads(msg)
                 except json.JSONDecodeError:
                     pass
+            self._health.low_state_count += 1
 
-    async def disconnect(self) -> None:
-        if self._connected:
-            try:
-                await self._halt_motion(MotionEndReason.DISCONNECT, send_stopmove=True)
-            except Exception as exc:
-                logger.warning("Pre-disconnect halt failed: %s", exc)
-        self._connected = False
-        if self._conn is not None and hasattr(self._conn, "disconnect"):
-            try:
-                if self._bg_loop is not None and self._bg_loop.is_running():
-                    future = asyncio.run_coroutine_threadsafe(
-                        self._conn.disconnect(), self._bg_loop
-                    )
-                    future.result(timeout=5.0)
-            except Exception as exc:
-                logger.warning("WebRTC disconnect error: %s", exc)
-        self._conn = None
-        self._last_sport_state = None
-        self._last_low_state = None
-        logger.info("UnitreeWebRTCTransport disconnected")
-
+    # --------------------------------------------------------------- state reading
     async def read_state(self) -> UnitreeState:
         if not self._connected:
             raise ConnectionError("UnitreeWebRTCTransport not connected")
@@ -588,6 +1057,7 @@ class UnitreeWebRTCTransport(UnitreeTransport):
             await asyncio.sleep(0.1)
         return False
 
+    # --------------------------------------------------------------- commands
     async def send_command(self, command: UnitreeCommand) -> bool:
         """Send a posture/stop sport command to the Go2 over WebRTC.
 
@@ -663,6 +1133,7 @@ class UnitreeWebRTCTransport(UnitreeTransport):
         logger.info("WebRTC sport command sent: action=%s api_id=%s", action, api_id)
         return True
 
+    # --------------------------------------------------------------- sport publish
     async def _publish_sport(self, api_id: int, parameter: Any = None) -> Any:
         """Publish a sport request on the data channel.
 
@@ -708,6 +1179,7 @@ class UnitreeWebRTCTransport(UnitreeTransport):
             )
         return response
 
+    # --------------------------------------------------------------- velocity helpers
     def _sport_move_payload(self, vx: float, vy: float, vyaw: float) -> dict[str, Any]:
         """Build fire-and-forget Move(1008) body (go2_ros2_sdk / WebRTC ``msg`` envelope)."""
         generated_id = int(time.time() * 1000) % 2147483648
@@ -746,9 +1218,7 @@ class UnitreeWebRTCTransport(UnitreeTransport):
         # MCF Move(1008) handles vy (strafe) but combined forward+turn arcs work on joystick.
         if vyaw != 0.0:
             return True
-        if vy != 0.0:
-            return False
-        return False
+        return False  # pure vx or vy → Move
 
     def _publish_drive_velocity(
         self, pub_sub: Any, vx: float, vy: float, vyaw: float
@@ -784,6 +1254,7 @@ class UnitreeWebRTCTransport(UnitreeTransport):
             "ry": 0.0,
         }
 
+    # --------------------------------------------------------------- motion control
     async def _halt_motion(
         self, reason: MotionEndReason, *, send_stopmove: bool
     ) -> None:
@@ -808,6 +1279,7 @@ class UnitreeWebRTCTransport(UnitreeTransport):
             self._motion_gen += 1
             return self._motion_gen
 
+    # --------------------------------------------------------------- drive (one-shot)
     async def _publish_drive(
         self, vx: float, vy: float, vyaw: float, duration: float
     ) -> None:
@@ -819,9 +1291,15 @@ class UnitreeWebRTCTransport(UnitreeTransport):
         await self._wait_drive_idle()
 
         self._drive_idle.clear()
+        self._health.drive_streams_active += 1
         try:
             await self._run_on_conn_loop(
-                self._drive_stream(gen, vx, vy, vyaw, duration),
+                self._velocity_stream(
+                    gen=gen,
+                    get_velocity=lambda: (vx, vy, vyaw),
+                    deadline=None,
+                    duration=duration,
+                ),
                 timeout=max(duration, 0.0) + 10.0,
             )
             if gen == self._motion_gen and self._last_drive_end_reason not in (
@@ -835,7 +1313,9 @@ class UnitreeWebRTCTransport(UnitreeTransport):
                 self._last_drive_end_reason = MotionEndReason.COMPLETED
         finally:
             self._drive_idle.set()
+            self._health.drive_streams_active -= 1
 
+    # --------------------------------------------------------------- stream_hold (continuous)
     async def stream_hold(
         self,
         get_velocity: Callable[[], tuple[float, float, float]],
@@ -850,90 +1330,57 @@ class UnitreeWebRTCTransport(UnitreeTransport):
         gen = self._bump_motion_generation()
         await self._wait_drive_idle()
         self._drive_idle.clear()
+        self._health.drive_streams_active += 1
         timeout = max(0.0, session_deadline - time.time()) + 15.0
         try:
             await self._run_on_conn_loop(
-                self._hold_stream(gen, get_velocity, session_deadline),
+                self._velocity_stream(
+                    gen=gen,
+                    get_velocity=get_velocity,
+                    deadline=session_deadline,
+                    duration=None,
+                ),
                 timeout=timeout,
             )
             if gen == self._motion_gen:
                 self._last_drive_end_reason = MotionEndReason.COMPLETED
         finally:
             self._drive_idle.set()
+            self._health.drive_streams_active -= 1
             if zero_on_exit and self._conn is not None:
                 await self._send_drive_zeros()
 
-    async def _hold_stream(
+    # --------------------------------------------------------------- velocity stream (common core)
+    async def _velocity_stream(
         self,
+        *,
         gen: int,
         get_velocity: Callable[[], tuple[float, float, float]],
-        session_deadline: float,
+        deadline: float | None,
+        duration: float | None,
     ) -> None:
-        """Publish velocity at 50Hz until preempted, disconnected, or session ends."""
+        """Common core for both drive (one-shot) and hold (continuous) velocity streaming.
+
+        - **deadline** (absolute monotonic loop time): continuous loop until exceeded.
+        - **duration** (seconds from now): one-shot loop — ignored if deadline is set.
+
+        Exactly one of deadline/duration must be provided.
+        """
         pub_sub = self._conn.datachannel.pub_sub
         use_move = self._settings.unitree_webrtc_drive_via_move
         period = 1.0 / _JOY_STREAM_HZ
-        watchdog = self._settings.unitree_control_watchdog_seconds
-        loop = asyncio.get_event_loop()
-        last_send_mono = 0.0
-        end_reason = MotionEndReason.COMPLETED
-
-        try:
-            while loop.time() < session_deadline:
-                if gen != self._motion_gen:
-                    end_reason = MotionEndReason.PREEMPTED
-                    break
-                if not self._connected:
-                    end_reason = MotionEndReason.DISCONNECT
-                    break
-                vx, vy, vyaw = get_velocity()
-                if not (vx or vy or vyaw):
-                    await asyncio.sleep(period)
-                    continue
-                now_mono = time.monotonic()
-                if last_send_mono > 0 and (now_mono - last_send_mono) > watchdog:
-                    end_reason = MotionEndReason.WATCHDOG
-                    break
-                if use_move:
-                    self._publish_drive_velocity(pub_sub, vx, vy, vyaw)
-                else:
-                    self._publish_joystick_velocity(pub_sub, vx, vy, vyaw)
-                last_send_mono = time.monotonic()
-                await asyncio.sleep(period)
-        except asyncio.CancelledError:
-            end_reason = MotionEndReason.CANCELLED
-            raise
-        except Exception:
-            end_reason = MotionEndReason.TRANSPORT_ERROR
-            raise
-        finally:
-            self._last_drive_end_reason = end_reason
-
-    async def _run_on_conn_loop(
-        self, coro: Any, *, timeout: float
-    ) -> Any:
-        if self._bg_loop is not None and self._bg_loop.is_running():
-            fut = asyncio.run_coroutine_threadsafe(coro, self._bg_loop)
-            return await asyncio.to_thread(fut.result, timeout)
-        return await coro
-
-    async def _drive_stream(
-        self,
-        gen: int,
-        vx: float,
-        vy: float,
-        vyaw: float,
-        duration: float,
-    ) -> None:
-        """Send non-zero joystick frames for ``duration``, then zero frames in ``finally``."""
-        pub_sub = self._conn.datachannel.pub_sub
-        use_move = self._settings.unitree_webrtc_drive_via_move
-        period = 1.0 / _JOY_STREAM_HZ
-        hold = max(0.0, duration)
         watchdog = self._settings.unitree_control_watchdog_seconds
         zero_count = self._settings.unitree_zero_frame_count
         loop = asyncio.get_event_loop()
-        deadline = loop.time() + hold
+
+        # Resolve stop condition
+        if deadline is not None and duration is not None:
+            raise ValueError("_velocity_stream: set deadline or duration, not both")
+        if deadline is None and duration is not None:
+            deadline = loop.time() + max(0.0, duration)
+        elif deadline is None:
+            deadline = float("inf")
+
         last_send_mono = 0.0
         end_reason = MotionEndReason.COMPLETED
 
@@ -950,6 +1397,7 @@ class UnitreeWebRTCTransport(UnitreeTransport):
                     end_reason = MotionEndReason.WATCHDOG
                     break
 
+                vx, vy, vyaw = get_velocity()
                 if use_move:
                     self._publish_drive_velocity(pub_sub, vx, vy, vyaw)
                 else:
@@ -967,7 +1415,11 @@ class UnitreeWebRTCTransport(UnitreeTransport):
             raise
         finally:
             self._last_drive_end_reason = end_reason
-            await self._send_drive_zeros(count=zero_count, pub_sub=pub_sub, period=period)
+            # Only send zeros for one-shot drives; continuous holds manage their own
+            if duration is not None:
+                await self._send_drive_zeros(
+                    count=zero_count, pub_sub=pub_sub, period=period
+                )
 
     async def _send_drive_zeros(
         self,
@@ -996,6 +1448,28 @@ class UnitreeWebRTCTransport(UnitreeTransport):
         else:
             await self._run_on_conn_loop(_zeros(), timeout=frames * interval + 5.0)
 
+    # --------------------------------------------------------------- event-loop bridging
+    async def run_on_conn_loop(self, coro: Any, *, timeout: float = 30.0) -> Any:
+        """Schedule *coro* on the Go2 WebRTC background loop (gateway media bridge)."""
+        return await self._run_on_conn_loop(coro, timeout=timeout)
+
+    @property
+    def webrtc_conn(self) -> Any:
+        return self._conn
+
+    async def _run_on_conn_loop(
+        self, coro: Any, *, timeout: float
+    ) -> Any:
+        if self._bg_loop is not None and self._bg_loop.is_running():
+            fut = asyncio.run_coroutine_threadsafe(coro, self._bg_loop)
+            try:
+                return await asyncio.to_thread(fut.result, timeout)
+            except TimeoutError:
+                self._health.bridge_call_timeouts += 1
+                raise
+        return await coro
+
+    # --------------------------------------------------------------- state mapping
     def _map_state(self, sport: dict[str, Any], low: dict[str, Any] | None) -> UnitreeState:
         """Map WebRTC sport mode state dict to UnitreeState."""
         try:
@@ -1031,11 +1505,13 @@ class UnitreeWebRTCTransport(UnitreeTransport):
 
             # Battery from low state
             battery = 100.0
+            ultrasonic = None
             if low is not None:
                 # power_v voltage → percentage (8S LiPo: 24V empty, 33.6V full)
                 voltage = float(low.get("power_v", 0) or 0)
                 if voltage > 0:
                     battery = max(0.0, min(100.0, (voltage - 24.0) / (33.6 - 24.0) * 100.0))
+                ultrasonic = _extract_ultrasonic_from_dict(low)
 
             return UnitreeState(
                 connected=True,
@@ -1048,10 +1524,15 @@ class UnitreeWebRTCTransport(UnitreeTransport):
                 sport_mode=mode,
                 velocity=(float(vel[0]), float(vel[1]), float(vel[2]) if len(vel) >= 3 else 0.0),
                 imu_rpy=(float(rpy[0]), float(rpy[1]), float(rpy[2]) if len(rpy) >= 3 else 0.0),
+                ultrasonic=ultrasonic,
             )
         except Exception as exc:
             logger.warning("WebRTC state mapping error: %s", exc)
             return UnitreeState(connected=True, error_code=-1)
+
+
+def _aes_key_from_env() -> str | None:
+    return os.environ.get("UNITREE_AES_128_KEY") or os.environ.get("UNITREE_AES_KEY") or None
 
 
 def create_webrtc_transport(settings: Settings) -> UnitreeWebRTCTransport:

@@ -22,6 +22,14 @@ class ImuRPY(BaseModel):
     yaw_deg: float = 0.0
 
 
+class UltrasonicData(BaseModel):
+    """Go2 ultrasonic distance readings in metres."""
+    front_m: float | None = None
+    rear_m: float | None = None
+    left_m: float | None = None
+    right_m: float | None = None
+
+
 class RobotSelfState(BaseModel):
     """Robot-specific self-state reported by the perception adapter.
 
@@ -36,3 +44,4 @@ class RobotSelfState(BaseModel):
     velocity: Velocity | None = None
     imu_rpy: ImuRPY | None = None
     state_age_seconds: float | None = None
+    ultrasonic: UltrasonicData | None = None

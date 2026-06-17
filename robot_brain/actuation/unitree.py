@@ -33,6 +33,8 @@ class UnitreeState(BaseModel):
     velocity: tuple[float, float, float] = (0.0, 0.0, 0.0)
     # IMU orientation (roll, pitch, yaw) in radians — raw Go2 format.
     imu_rpy: tuple[float, float, float] = (0.0, 0.0, 0.0)
+    # Ultrasonic distances in metres (front, left, right, rear) — Go2 LowState.
+    ultrasonic: tuple[float, float, float, float] | None = None
 
 
 class UnitreeCommand(BaseModel):
@@ -314,7 +316,8 @@ class UnitreeRobot(RobotInterface):
         self._stopped = False
 
         if self.dry_run:
-            while time.time() < session_deadline:
+            loop = asyncio.get_event_loop()
+            while loop.time() < session_deadline:
                 vx, vy, vyaw = clamped()
                 if not (vx or vy or vyaw):
                     await asyncio.sleep(0.05)

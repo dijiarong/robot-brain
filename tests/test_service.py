@@ -79,7 +79,7 @@ class ServiceAPITests(unittest.TestCase):
             status = self.client.get("/api/status")
 
         self.assertEqual(200, dashboard.status_code)
-        self.assertIn("Robot Brain Console", dashboard.text)
+        self.assertIn("Robot Brain", dashboard.text)
         self.assertEqual({"status": "ok", "service_running": True}, health.json())
         self.assertTrue(status.json()["service"]["running"])
 

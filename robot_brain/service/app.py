@@ -2,18 +2,22 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import AsyncIterator
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from config.settings import Settings
 from robot_brain.core.events import Event
 from robot_brain.runtime.loop import AgentRuntime
 from robot_brain.runtime.scheduler import AgentScheduler
-from robot_brain.service.dashboard import DASHBOARD_HTML
+from robot_brain.service.dashboard import load_dashboard_html
 from robot_brain.service.runner import AgentService
+
+_STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 
 class TaskCreateRequest(BaseModel):
@@ -47,9 +51,13 @@ def create_app(service: AgentService | None = None) -> FastAPI:
     app = FastAPI(title="Robot Brain Service", version="0.1.0", lifespan=lifespan)
     app.state.agent_service = service
 
+    # Mount static files (CSS, JS, fonts can live alongside index.html)
+    if _STATIC_DIR.exists():
+        app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
+
     @app.get("/", response_class=HTMLResponse)
     async def dashboard() -> str:
-        return DASHBOARD_HTML
+        return load_dashboard_html()
 
     @app.get("/health")
     async def health() -> dict[str, object]:

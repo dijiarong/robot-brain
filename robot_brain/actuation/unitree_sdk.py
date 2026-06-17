@@ -42,6 +42,37 @@ def _import_sdk() -> Any:
         ) from exc
 
 
+def _extract_ultrasonic(low: Any) -> tuple[float, float, float, float] | None:
+    """Extract ultrasonic distances (metres) from Go2 LowState_.
+
+    The Go2 LowState_ struct carries an ``ultrasonic`` field: an array of 4
+    uint32 values in millimetres ordered [front, left, right, rear].
+    Falls back gracefully if the field is absent (older firmware / mock).
+    """
+    raw = getattr(low, "ultrasonic", None)
+    if raw is None:
+        return None
+    try:
+        values = [float(v) for v in raw]
+        if len(values) < 4:
+            return None
+        # mm → m, negative sentinel (-1 or 65535) means "no reading"
+        def _to_m(v: float) -> float | None:
+            if v <= 0 or v >= 65000:
+                return None
+            return v / 1000.0
+
+        front = _to_m(values[0])
+        left_ = _to_m(values[1])
+        right_ = _to_m(values[2])
+        rear = _to_m(values[3])
+        if all(v is None for v in (front, left_, right_, rear)):
+            return None
+        return (front or 0.0, left_ or 0.0, right_ or 0.0, rear or 0.0)
+    except (TypeError, ValueError, IndexError):
+        return None
+
+
 class UnitreeSDKTransport(UnitreeTransport):
     """Real transport using unitree_sdk2_python for Go2.
 
@@ -218,12 +249,14 @@ class UnitreeSDKTransport(UnitreeTransport):
 
             # Battery from low state
             battery = 100.0
+            ultrasonic = None
             if low is not None:
                 # LowState_ has power_v (voltage) — map roughly to percentage
                 # Go2 typical range: ~24V (empty) to ~33.6V (full, 8S LiPo)
                 voltage = float(getattr(low, "power_v", 0))
                 if voltage > 0:
                     battery = max(0.0, min(100.0, (voltage - 24.0) / (33.6 - 24.0) * 100.0))
+                ultrasonic = _extract_ultrasonic(low)
 
             # Raw IMU rpy
             raw_rpy = imu.rpy if imu and hasattr(imu, "rpy") else [0.0, 0.0, 0.0]
@@ -246,6 +279,7 @@ class UnitreeSDKTransport(UnitreeTransport):
                     float(raw_rpy[1]) if len(raw_rpy) >= 2 else 0.0,
                     float(raw_rpy[2]) if len(raw_rpy) >= 3 else 0.0,
                 ),
+                ultrasonic=ultrasonic,
             )
         except Exception as exc:
             logger.warning("State mapping error: %s", exc)

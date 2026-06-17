@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass, field
+from urllib.parse import urlparse
 
 
 def _env_bool(key: str, default: bool) -> bool:
@@ -100,16 +102,116 @@ class Settings:
     unitree_webrtc_connect_timeout: float = field(
         default_factory=lambda: float(os.getenv("RDB_UNITREE_WEBRTC_CONNECT_TIMEOUT", "30.0"))
     )
+    unitree_webrtc_connect_retries: int = field(
+        default_factory=lambda: int(os.getenv("RDB_UNITREE_WEBRTC_CONNECT_RETRIES", "3"))
+    )
     # MCF firmware: omni vx/vy/vyaw via sport Move(1008); joystick alone often only drives ly.
     unitree_webrtc_drive_via_move: bool = field(
         default_factory=lambda: os.getenv("RDB_UNITREE_WEBRTC_DRIVE_VIA_MOVE", "true").lower()
         in ("1", "true", "yes")
+    )
+    # Forward Go2 front camera to local RTP (topsun_robot_service UDP :5000).
+    unitree_video_relay: bool = field(
+        default_factory=lambda: os.getenv("RDB_UNITREE_VIDEO_RELAY", "true").lower()
+        in ("1", "true", "yes")
+    )
+    unitree_video_relay_host: str = field(
+        default_factory=lambda: os.getenv("RDB_UNITREE_VIDEO_RELAY_HOST", "127.0.0.1")
+    )
+    unitree_video_relay_port: int = field(
+        default_factory=lambda: int(os.getenv("RDB_UNITREE_VIDEO_RELAY_PORT", "5000"))
+    )
+    # Go2 audio ↔ topsun_robot_service (Opus RTP :5005 out, :5010 in from browser mic).
+    unitree_audio_relay: bool = field(
+        default_factory=lambda: os.getenv("RDB_UNITREE_AUDIO_RELAY", "true").lower()
+        in ("1", "true", "yes")
+    )
+    unitree_audio_relay_host: str = field(
+        default_factory=lambda: os.getenv("RDB_UNITREE_AUDIO_RELAY_HOST", "127.0.0.1")
+    )
+    unitree_audio_relay_port: int = field(
+        default_factory=lambda: int(os.getenv("RDB_UNITREE_AUDIO_RELAY_PORT", "5005"))
+    )
+    unitree_audio_ingress_host: str = field(
+        default_factory=lambda: os.getenv("RDB_UNITREE_AUDIO_INGRESS_HOST", "127.0.0.1")
+    )
+    unitree_audio_ingress_port: int = field(
+        default_factory=lambda: int(os.getenv("RDB_UNITREE_AUDIO_INGRESS_PORT", "5010"))
+    )
+    # Unified gateway: browser WebRTC + Go2 WebRTC in one process (no UDP/ffmpeg relay).
+    unitree_gateway: bool = field(
+        default_factory=lambda: _env_bool("RDB_UNITREE_GATEWAY", False)
+    )
+    gateway_signaling_url: str = field(
+        default_factory=lambda: os.getenv("RDB_GATEWAY_SIGNALING_URL", "ws://127.0.0.1:9999/ws")
+    )
+    gateway_robot_id: str = field(
+        default_factory=lambda: os.getenv("RDB_GATEWAY_ROBOT_ID", "robot_001")
+    )
+    gateway_turn_url: str = field(
+        default_factory=lambda: os.getenv("RDB_GATEWAY_TURN_URL", "")
+    )
+    gateway_turn_user: str = field(
+        default_factory=lambda: os.getenv("RDB_GATEWAY_TURN_USER", "")
+    )
+    gateway_turn_pass: str = field(
+        default_factory=lambda: os.getenv("RDB_GATEWAY_TURN_PASS", "")
+    )
+    # Trust self-signed TLS on wss:// signaling (cloud dev cert). Disable in production.
+    gateway_signaling_insecure_ssl: bool = field(
+        default_factory=lambda: _env_bool("RDB_GATEWAY_SIGNALING_INSECURE_SSL", True)
     )
 
     # Go2 FastReflex — consecutive non-zero error_code reads before triggering stop.
     go2_reflex_error_debounce: int = field(
         default_factory=lambda: int(os.getenv("RDB_GO2_REFLEX_ERROR_DEBOUNCE", "1"))
     )
+
+    # Teleop session (remote velocity control ingress).
+    # Deadman: if no setpoint arrives within this window, drive auto-stops.
+    teleop_deadman_ms: int = field(
+        default_factory=lambda: int(os.getenv("RDB_TELEOP_DEADMAN_MS", "300"))
+    )
+    # Lease TTL: a held control lease expires this long after the last renewal
+    # (each accepted setpoint renews it).
+    teleop_lease_ttl_ms: int = field(
+        default_factory=lambda: int(os.getenv("RDB_TELEOP_LEASE_TTL_MS", "2000"))
+    )
+    # Max seconds per internal stream_hold chunk before the loop re-checks
+    # lease/deadman state.
+    teleop_chunk_seconds: float = field(
+        default_factory=lambda: float(os.getenv("RDB_TELEOP_CHUNK_SECONDS", "1.0"))
+    )
+
+    def __post_init__(self) -> None:
+        self._apply_gateway_signaling_defaults()
+        self._apply_gateway_turn_defaults()
+
+    def _apply_gateway_signaling_defaults(self) -> None:
+        """Remote cloud signaling now uses WSS; upgrade legacy ws:// URLs."""
+        url = self.gateway_signaling_url
+        parsed = urlparse(url)
+        host = parsed.hostname or ""
+        if not host or host in ("127.0.0.1", "localhost"):
+            return
+        if parsed.scheme == "ws":
+            upgraded = url.replace("ws://", "wss://", 1)
+            object.__setattr__(self, "gateway_signaling_url", upgraded)
+
+    def _apply_gateway_turn_defaults(self) -> None:
+        """Match cloud test page TURN when signaling points at a remote host."""
+        if self.gateway_turn_url:
+            return
+        host = urlparse(self.gateway_signaling_url).hostname or ""
+        if not host or host in ("127.0.0.1", "localhost"):
+            return
+        if not re.match(r"^\d+\.\d+\.\d+\.\d+$", host) and "." not in host:
+            return
+        object.__setattr__(self, "gateway_turn_url", f"turn:{host}:3478")
+        if not self.gateway_turn_user:
+            object.__setattr__(self, "gateway_turn_user", "test")
+        if not self.gateway_turn_pass:
+            object.__setattr__(self, "gateway_turn_pass", "123456")
 
 
 SETTINGS = Settings()

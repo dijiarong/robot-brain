@@ -5,7 +5,7 @@ import logging
 import math
 
 from robot_brain.actuation.unitree import UnitreeRobot, UnitreeState
-from robot_brain.core.robot_self_state import ImuRPY, RobotSelfState, Velocity
+from robot_brain.core.robot_self_state import ImuRPY, RobotSelfState, UltrasonicData, Velocity
 from robot_brain.perception.base import Observation, PerceptionAdapter
 
 logger = logging.getLogger(__name__)
@@ -13,6 +13,14 @@ logger = logging.getLogger(__name__)
 
 def _build_self_state(raw: UnitreeState, age: float) -> RobotSelfState:
     """Map a raw UnitreeState into a RobotSelfState (IMU radians → degrees)."""
+    ultrasonic = None
+    if raw.ultrasonic is not None:
+        ultrasonic = UltrasonicData(
+            front_m=_or_none(raw.ultrasonic[0]),
+            left_m=_or_none(raw.ultrasonic[1]),
+            right_m=_or_none(raw.ultrasonic[2]),
+            rear_m=_or_none(raw.ultrasonic[3]),
+        )
     return RobotSelfState(
         source="unitree_go2",
         is_standing=raw.is_standing,
@@ -30,7 +38,13 @@ def _build_self_state(raw: UnitreeState, age: float) -> RobotSelfState:
             yaw_deg=math.degrees(raw.imu_rpy[2]) if len(raw.imu_rpy) >= 3 else 0.0,
         ),
         state_age_seconds=age,
+        ultrasonic=ultrasonic,
     )
+
+
+def _or_none(v: float) -> float | None:
+    """Return None for zero / sentinel ultrasonic values."""
+    return v if v > 0 else None
 
 
 class UnitreePerceptionAdapter(PerceptionAdapter):

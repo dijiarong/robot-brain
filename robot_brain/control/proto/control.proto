@@ -1,0 +1,73 @@
+syntax = "proto3";
+
+package robotbrain.control;
+
+// Go gateway (AvatarRobot-Service) generates a client from this same file.
+option go_package = "avatar-robot-service/pkg/pb/robotbrain;robotbrain";
+
+// Minimal control-plane contract for the robot-brain teleop ingress.
+//
+// This is the gRPC shell over TeleopSession (lease + deadman watchdog).
+// It is intentionally small: only what Stage-1 "前后左右" needs. Media
+// (video/audio/DataChannel) is NOT here — that stays in the Go media engine.
+service RobotControl {
+  // Acquire (or renew) the single control lease.
+  rpc AcquireLease(AcquireLeaseRequest) returns (LeaseReply);
+  rpc ReleaseLease(LeaseRef) returns (Ack);
+
+  // High-frequency velocity teleop. Client streams setpoints + heartbeats;
+  // server streams back control events (accepted / stopped / watchdog / ...).
+  rpc Teleop(stream MoveSetpoint) returns (stream ControlEvent);
+
+  // Hard stop, independent of any lease (highest priority).
+  rpc EmergencyStop(EstopRequest) returns (Ack);
+}
+
+message AcquireLeaseRequest {
+  string operator_id = 1;
+  uint32 ttl_ms = 2;  // 0 = use server default
+}
+
+message LeaseReply {
+  bool granted = 1;
+  string lease_id = 2;
+  double expires_at = 3;  // server monotonic seconds
+  string reason = 4;
+}
+
+message LeaseRef {
+  string lease_id = 1;
+}
+
+// Body-frame velocities: vx forward(+)/back(-), vy left(+)/right(-),
+// vyaw counter-clockwise(+). Units: m/s and rad/s.
+message MoveSetpoint {
+  string lease_id = 1;
+  float vx = 2;
+  float vy = 3;
+  float vyaw = 4;
+  uint64 seq = 5;
+  int64 ts = 6;  // client epoch milliseconds (telemetry only)
+}
+
+message ControlEvent {
+  enum Type {
+    ACCEPTED = 0;
+    REJECTED = 1;
+    STOPPED = 2;
+    PREEMPTED = 3;
+    WATCHDOG = 4;
+    OBSTACLE = 5;   // front ultrasonic < safety threshold
+  }
+  Type type = 1;
+  string message = 2;
+}
+
+message EstopRequest {
+  string reason = 1;
+}
+
+message Ack {
+  bool ok = 1;
+  string message = 2;
+}
