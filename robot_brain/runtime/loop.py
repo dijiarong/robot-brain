@@ -140,10 +140,20 @@ class AgentRuntime:
                 llm = MockLLM()
             elif settings.llm_backend == "openai":
                 from robot_brain.llm.openai_client import OpenAIClient
-
                 from robot_brain.llm.prompt_builder import PromptBuilder
 
                 llm = OpenAIClient(
+                    settings.openai_model,
+                    skills=skills,
+                    backend=settings.robot_backend,
+                    prompt_builder=PromptBuilder(settings=settings),
+                    settings=settings,
+                )
+            elif settings.llm_backend == "compatible":
+                from robot_brain.llm.compatible_client import CompatibleLLMClient
+                from robot_brain.llm.prompt_builder import PromptBuilder
+
+                llm = CompatibleLLMClient(
                     settings.openai_model,
                     skills=skills,
                     backend=settings.robot_backend,

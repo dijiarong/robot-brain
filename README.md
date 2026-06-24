@@ -189,7 +189,7 @@ $env:RDB_MEMORY_DB = "D:\robot-data\robot_brain.sqlite3"
 
 | Environment Variable | Default | Description |
 | --- | --- | --- |
-| `RDB_LLM` | `mock` | LLM 后端，当前支持 `mock` 和可选 `openai` |
+| `RDB_LLM` | `mock` | LLM 后端：`mock` / `openai`（Responses API）/ `compatible`（Chat Completions） |
 | `RDB_ROBOT` | `mock` | 机器人后端 |
 | `RDB_PERCEPTION` | `mock` | 感知后端，支持 `mock` / `unitree`（Go2 本体状态桥接） |
 | `RDB_MEMORY_DB` | `data/robot_brain.sqlite3` | SQLite 路径 |
@@ -201,6 +201,42 @@ $env:RDB_MEMORY_DB = "D:\robot-data\robot_brain.sqlite3"
 | `RDB_UNITREE_ENABLE_MOTION` | `false` | 真实姿态/平移硬安全门；`stop` 在已连接时始终允许 |
 
 更多 Unitree 变量（限速、watchdog、Move/摇杆策略等）见 [`docs/unitree-setup.md`](./docs/unitree-setup.md) 与 `config/settings.py`。
+
+### LLM 后端详细配置
+
+| 后端 | API 类型 | 适用场景 |
+|------|----------|----------|
+| `mock` | 无（规则匹配） | 开发/测试，无需 API Key |
+| `openai` | OpenAI Responses API | OpenAI 官方模型（gpt-4o 等） |
+| `compatible` | Chat Completions + tools | DeepSeek / Ollama / vLLM / LM Studio 等 OpenAI 兼容服务 |
+
+**DeepSeek 配置：**
+
+```bash
+export RDB_LLM=compatible
+export OPENAI_BASE_URL=https://api.deepseek.com
+export OPENAI_API_KEY=sk-...
+export RDB_OPENAI_MODEL=deepseek-chat
+```
+
+**Ollama 本地配置：**
+
+```bash
+export RDB_LLM=compatible
+export OPENAI_BASE_URL=http://127.0.0.1:11434/v1
+export OPENAI_API_KEY=ollama
+export RDB_OPENAI_MODEL=qwen2.5:7b
+```
+
+**推荐模型：**
+
+| 模型 | Tool Calling | 备注 |
+|------|:---:|------|
+| deepseek-chat (V3) | ✅ | 国内部署、成本低 |
+| gpt-4o / gpt-4o-mini | ✅ | 需 `openai` 后端（Responses API） |
+| qwen2.5:7b+ | ✅ | Ollama 本地，支持 tool calling |
+| llama3.1:8b+ | ⚠️ | tool calling 不稳定，建议 ≥70B |
+| mistral-nemo | ⚠️ | 需实测 |
 
 项目测试基于 `pytest`（部分用例使用 `pytest-asyncio`）：
 
