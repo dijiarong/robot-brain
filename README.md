@@ -266,6 +266,41 @@ docs/
   plans/            架构与迭代记录
 ```
 
+## 技能列表
+
+| 技能 | 说明 | 后端 |
+|------|------|------|
+| `navigate` | 导航到坐标 | mock |
+| `patrol` | 巡逻多个路点 | mock |
+| `nudge` | 短距移动 (10–50cm) | mock / unitree |
+| `scan` | 原地旋转 (±90°) | mock / unitree |
+| `retreat` | 后退 (10–100cm) | mock / unitree |
+| `explore` | **有限步探索** — 循环 scan/nudge/retreat，带硬停止条件 | mock / unitree |
+| `recognize` | 查询已知物体 | all |
+| `report` | 发送状态报告 | all |
+| `stop` | 立即停止 | all |
+
+### explore 技能
+
+组合技能，规则驱动循环：scan → 读障碍 → 换向/nudge/retreat。
+
+**参数：**
+- `max_steps`: 最大循环次数 (1–20, Validator 限 `RDB_EXPLORE_MAX_STEPS`, 默认 5)
+- `step_distance_cm`: 单步距离 (10–50cm, 默认 20)
+- `scan_degrees`: 每步扫描角度 (10–90°, 默认 45)
+- `report_every`: 每 N 步记录一次 (默认 2)
+
+**停止条件（硬规则）：** max_steps / max_duration / 低电量 / 急停 / 机器人错误 / 数据 stale / 四面堵
+
+**环境变量：**
+
+| 变量 | 默认 | 说明 |
+|------|------|------|
+| `RDB_EXPLORE_MAX_STEPS` | `5` | Validator 硬顶 |
+| `RDB_EXPLORE_MAX_DURATION` | `120` | 单次最长秒数 |
+| `RDB_EXPLORE_STEP_CM` | `20` | 默认单步距离 |
+| `RDB_EXPLORE_SCAN_DEG` | `45` | 默认扫描角度 |
+
 ## 当前边界
 
 - 默认服务仅监听 `127.0.0.1:8000`，适用于本机可信环境。

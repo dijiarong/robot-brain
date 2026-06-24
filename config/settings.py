@@ -28,7 +28,7 @@ class Settings:
     # Safety constraints.
     max_linear_speed: float = 1.5
     max_step_distance: float = 30.0
-    require_confirmation_for: tuple[str, ...] = ("follow", "nudge", "scan", "retreat")
+    require_confirmation_for: tuple[str, ...] = ("follow", "nudge", "scan", "retreat", "explore")
     object_ttl_seconds: float = 30.0
     obstacle_proximity_threshold: float = 0.3  # metres — ultrasonic proximity alert
 
@@ -162,6 +162,20 @@ class Settings:
     # Trust self-signed TLS on wss:// signaling (cloud dev cert). Disable in production.
     gateway_signaling_insecure_ssl: bool = field(
         default_factory=lambda: _env_bool("RDB_GATEWAY_SIGNALING_INSECURE_SSL", True)
+    )
+
+    # Bounded Explore — composite skill limits.
+    explore_max_steps: int = field(
+        default_factory=lambda: int(os.getenv("RDB_EXPLORE_MAX_STEPS", "5"))
+    )
+    explore_max_duration: float = field(
+        default_factory=lambda: float(os.getenv("RDB_EXPLORE_MAX_DURATION", "120"))
+    )
+    explore_step_cm: float = field(
+        default_factory=lambda: float(os.getenv("RDB_EXPLORE_STEP_CM", "20"))
+    )
+    explore_scan_deg: float = field(
+        default_factory=lambda: float(os.getenv("RDB_EXPLORE_SCAN_DEG", "45"))
     )
 
     # Go2 FastReflex — consecutive non-zero error_code reads before triggering stop.

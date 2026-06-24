@@ -563,11 +563,11 @@ class GenericSkillsOnGo2Tests(unittest.IsolatedAsyncioTestCase):
 # ---------------------------------------------------------------------------
 
 class Go2SkillsFactoryTests(unittest.TestCase):
-    def test_factory_returns_three_skills(self):
+    def test_factory_returns_skills(self):
         skills = go2_skills(_settings())
-        self.assertEqual(3, len(skills))
+        self.assertEqual(4, len(skills))
         names = {s.name for s in skills}
-        self.assertEqual({"nudge", "scan", "retreat"}, names)
+        self.assertEqual({"nudge", "scan", "retreat", "explore"}, names)
 
 
 if __name__ == "__main__":

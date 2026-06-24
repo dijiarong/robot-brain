@@ -20,6 +20,10 @@
 - [第十四次迭代：认知增强 — LLM 感知 + 自主决策升级](./2026-06-24-140000-cognitive-enhancement.md)：PromptBuilder 可组合提示、cognitive_snapshot 状态解读、对话历史注入、状态感知决策策略；代码/测试完成。
 - [第十五次迭代：OpenAI 兼容 Chat Completions 适配器](./2026-06-24-150000-compatible-llm-backend.md)：新增 `RDB_LLM=compatible` 后端，走标准 Chat Completions + tools API，覆盖 DeepSeek / Ollama / vLLM / LM Studio；代码/测试完成。
 
+## 进行中 / 计划中
+
+- [第十六次迭代：有限步探索模式（Bounded Explore）](./2026-06-24-160000-bounded-explore-mode.md)：composite `explore` 技能（scan/nudge/retreat 规则循环 + 硬停止条件）；mock/fake 可验收，真机 dry-run → live；不含 SLAM/frontier。
+
 ## 后续方向池
 
 - [第十二次及后续迭代方向（备选）](./2026-06-15-000000-next-iteration-options.md)：FastReflex、tool 过滤、服务监控、感知流等多方向对比与选型建议。

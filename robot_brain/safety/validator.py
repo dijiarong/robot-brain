@@ -133,6 +133,19 @@ class SafetyValidator:
             d = params.get("distance_cm", 30.0)
             if not (10.0 <= d <= 100.0):
                 return "retreat distance must be 10–100 cm"
+        if skill_name == "explore":
+            ms = params.get("max_steps", 5)
+            if ms > self.settings.explore_max_steps:
+                return (
+                    f"explore max_steps ({ms}) exceeds settings limit "
+                    f"({self.settings.explore_max_steps})"
+                )
+            sd = params.get("step_distance_cm", 20.0)
+            if not (10.0 <= sd <= 50.0):
+                return "explore step_distance_cm must be 10–50 cm"
+            deg = params.get("scan_degrees", 45.0)
+            if not (10.0 <= deg <= 90.0):
+                return "explore scan_degrees must be 10–90°"
         return ""
 
     def _validate_backend(self, skill_name: str) -> str:

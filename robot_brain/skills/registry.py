@@ -7,7 +7,7 @@ from robot_brain.skills.base import Skill
 
 # Tools visible to LLM on the Unitree backend.
 UNITREE_LLM_SKILLS: frozenset[str] = frozenset({
-    "nudge", "scan", "retreat", "recognize", "report", "stop",
+    "nudge", "scan", "retreat", "recognize", "report", "stop", "explore",
 })
 
 # Generic motion tools hidden from LLM on Unitree (still registered

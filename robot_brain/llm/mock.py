@@ -28,6 +28,8 @@ class MockLLM(LLMClient):
         if text.startswith("report warning:"):
             message = command.split(":", maxsplit=1)[1].strip()
             return [ToolCall(skill_name="report", parameters={"message": message, "severity": "warning"})]
+        if "explore" in text or "look around" in text:
+            return [ToolCall(skill_name="explore", parameters={"max_steps": 3})]
         if "patrol" in text:
             return [ToolCall(skill_name="patrol", parameters={"waypoints": [{"x": 4, "y": 0}, {"x": 4, "y": 3}]})]
         if "navigate" in text or "go to" in text:

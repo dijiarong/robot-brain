@@ -253,5 +253,12 @@ class RetreatSkill(_Go2Skill):
 # Factory
 # ---------------------------------------------------------------------------
 
-def go2_skills(settings: Settings) -> list[Skill]:
-    return [NudgeSkill(settings), ScanSkill(settings), RetreatSkill(settings)]
+def go2_skills(settings: Settings, *, perception: Any | None = None) -> list[Skill]:
+    from robot_brain.skills.builtin.explore import ExploreSkill
+
+    return [
+        NudgeSkill(settings),
+        ScanSkill(settings),
+        RetreatSkill(settings),
+        ExploreSkill(settings, perception=perception),
+    ]

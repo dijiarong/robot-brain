@@ -132,9 +132,11 @@ class AgentRuntime:
         if settings.robot_backend == "unitree":
             from robot_brain.skills.builtin.go2_catalog import go2_skills
 
-            skills = SkillRegistry(default_skills() + go2_skills(settings))
+            skills = SkillRegistry(default_skills() + go2_skills(settings, perception=perception))
         else:
-            skills = SkillRegistry(default_skills())
+            from robot_brain.skills.builtin.explore import ExploreSkill
+
+            skills = SkillRegistry(default_skills() + [ExploreSkill(settings, perception=perception)])
         if llm is None:
             if settings.llm_backend == "mock":
                 llm = MockLLM()
