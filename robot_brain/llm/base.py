@@ -24,5 +24,6 @@ class LLMClient(ABC):
         world: WorldState,
         tools: list[dict[str, object]],
         memories: list[str],
+        conversation: list[dict[str, str]] | None = None,
     ) -> list[ToolCall]:
         """Turn an objective and world snapshot into whitelisted tool calls."""

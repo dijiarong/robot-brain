@@ -17,6 +17,7 @@
 - [第十次迭代：Go2 Perception Bridge](./2026-06-13-000000-unitree-perception-bridge.md)：打通 Go2 sport state → Observation → WorldState，新增 RobotSelfState 模型与 UnitreePerceptionAdapter；代码/测试完成，真机验证待现场。
 - [第十一次迭代：Go2 原生技能族](./2026-06-14-000000-go2-skill-family.md)：nudge/scan/retreat 分段 drive 映射 LLM tool；代码/测试完成，真机待现场。
 - [第十二次迭代：Go2 快反规则 + 后端工具过滤](./2026-06-15-120000-go2-fast-reflex-and-tool-filter.md)：FastReflex 读 robot_self_state；unitree 后端 LLM tool 白名单；代码/测试完成，真机待现场。
+- [第十四次迭代：认知增强 — LLM 感知 + 自主决策升级](./2026-06-24-140000-cognitive-enhancement.md)：PromptBuilder 可组合提示、cognitive_snapshot 状态解读、对话历史注入、状态感知决策策略；代码/测试完成。
 
 ## 后续方向池
 

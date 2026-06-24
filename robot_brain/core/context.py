@@ -1,12 +1,13 @@
 """Runtime dependency injection container."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from config.settings import Settings
 from robot_brain.actuation.base import RobotInterface
 from robot_brain.core.world_state import WorldState
 from robot_brain.llm.base import LLMClient
+from robot_brain.memory.conversation import ConversationMemory
 from robot_brain.memory.long_term import LongTermMemory
 from robot_brain.memory.short_term import ShortTermMemory
 from robot_brain.memory.world_state import WorldStateMemory
@@ -29,3 +30,4 @@ class AgentContext:
     short_term: ShortTermMemory
     long_term: LongTermMemory
     world_states: WorldStateMemory
+    conversations: ConversationMemory = field(default_factory=ConversationMemory)

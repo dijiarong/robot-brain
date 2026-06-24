@@ -131,6 +131,13 @@ class SQLiteMemoryStore:
                     ON decision_context(created_at DESC);
                 """
             )
+            # Schema migration: add world_snapshot column (idempotent)
+            try:
+                self._connection.execute(
+                    "ALTER TABLE decision_context ADD COLUMN world_snapshot TEXT DEFAULT NULL"
+                )
+            except sqlite3.OperationalError:
+                pass  # Column already exists
 
     def _ensure_thread(self, thread_id: str, timestamp: str | None = None) -> None:
         timestamp = timestamp or _utc_now()
@@ -441,15 +448,16 @@ class SQLiteMemoryStore:
         safety_result: str,
         next_plan: str,
         is_degraded: bool = False,
+        world_snapshot: str | None = None,
     ) -> None:
         with self._lock, self._connection:
             self._connection.execute(
                 """
                 INSERT INTO decision_context(
                     thread_id, command, chosen_skills, reason, memory_refs,
-                    safety_result, next_plan, is_degraded, created_at
+                    safety_result, next_plan, is_degraded, world_snapshot, created_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     thread_id,
@@ -460,6 +468,7 @@ class SQLiteMemoryStore:
                     safety_result,
                     next_plan,
                     1 if is_degraded else 0,
+                    world_snapshot,
                     _utc_now(),
                 ),
             )

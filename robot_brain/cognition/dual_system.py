@@ -22,9 +22,11 @@ class DualSystem:
         self.reflex = reflex
         self.planner = planner
 
-    async def decide(self, command: str, world: WorldState) -> Decision:
+    async def decide(
+        self, command: str, world: WorldState, *, conversation: list[dict[str, str]] | None = None
+    ) -> Decision:
         reflex_calls = self.reflex.decide(world)
         if reflex_calls:
             return Decision(source="fast", tool_calls=reflex_calls, reason=reflex_calls[0].reason or "fast reflex")
-        calls = await self.planner.plan(command, world)
+        calls = await self.planner.plan(command, world, conversation=conversation)
         return Decision(source="slow", tool_calls=calls, reason="slow planner")

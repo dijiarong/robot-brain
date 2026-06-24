@@ -25,7 +25,8 @@ class OrchestrationNodes:
 
     async def decide(self, state: GraphState) -> GraphState:
         command = state["command"]
-        decision = await self.dual_system.decide(command, self.context.world)
+        conversation = self._get_conversation_context(state.get("thread_id", ""))
+        decision = await self.dual_system.decide(command, self.context.world, conversation=conversation)
         task = self.context.world.current_task
         if task is None or task.objective != command:
             self.context.world.current_task = TaskProgress(objective=command, status="running")
@@ -39,6 +40,18 @@ class OrchestrationNodes:
             "plan_cycles": state.get("plan_cycles", 0) + 1,
             "status": "decided",
         }
+
+    def _get_conversation_context(self, thread_id: str) -> list[dict[str, str]] | None:
+        """Extract recent dialogue turns for LLM context."""
+        if not thread_id:
+            return None
+        messages = self.context.conversations.recent(thread_id, limit=10)
+        turns = [
+            {"role": msg.role, "content": msg.content}
+            for msg in messages
+            if msg.role in ("user", "assistant")
+        ]
+        return turns or None
 
     async def select_action(self, state: GraphState) -> GraphState:
         iterations = state.get("iterations", 0) + 1

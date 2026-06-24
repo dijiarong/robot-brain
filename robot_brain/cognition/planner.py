@@ -26,11 +26,13 @@ class Planner:
         self._backend = backend
         self._validator = LLMOutputValidator(skills)
 
-    async def plan(self, command: str, world: WorldState) -> list[ToolCall]:
+    async def plan(
+        self, command: str, world: WorldState, *, conversation: list[dict[str, str]] | None = None
+    ) -> list[ToolCall]:
         experiences = self.long_term.search(command)
         memories = self.short_term.recent() + [item.summary for item in experiences]
         tools = self.skills.tools_for_backend(self._backend)
-        calls = await self.llm.plan(command, world, tools, memories)
+        calls = await self.llm.plan(command, world, tools, memories, conversation=conversation)
         calls, errors = self._validator.validate_tool_calls(calls)
         for error in errors:
             self.short_term.add(f"LLM output rejected: [{error.code}] {error.message}")

@@ -239,7 +239,7 @@ class DualSystemGo2Tests(unittest.TestCase):
         w = _go2_world()
         reflex = FastReflex(self.settings)
         class _DummyPlanner:
-            async def plan(self, cmd, world):
+            async def plan(self, cmd, world, **kwargs):
                 return [ToolCall(skill_name="report", parameters={"message": "ok", "severity": "info"}, source="slow")]
         dual = DualSystem(reflex, _DummyPlanner())
         import asyncio

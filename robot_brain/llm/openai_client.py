@@ -10,6 +10,7 @@ from robot_brain.core.errors import BrainError, ErrorCode
 from robot_brain.core.world_state import WorldState
 from robot_brain.llm.base import LLMClient, ToolCall
 from robot_brain.llm.output_validator import LLMOutputValidator
+from robot_brain.llm.prompt_builder import PromptBuilder
 from robot_brain.skills.registry import SkillRegistry
 
 logger = logging.getLogger(__name__)
@@ -26,6 +27,8 @@ class OpenAIClient(LLMClient):
         timeout_seconds: float = 30.0,
         max_retries: int = 1,
         skills: SkillRegistry | None = None,
+        backend: str = "mock",
+        prompt_builder: PromptBuilder | None = None,
     ) -> None:
         if client is None:
             try:
@@ -42,6 +45,8 @@ class OpenAIClient(LLMClient):
         self.validation_errors: list[BrainError] = []
         self._fallback: LLMClient | None = None
         self._validator: LLMOutputValidator | None = None
+        self._backend = backend
+        self._prompt_builder = prompt_builder or PromptBuilder()
         if skills is not None:
             self._validator = LLMOutputValidator(skills)
 
@@ -62,11 +67,12 @@ class OpenAIClient(LLMClient):
         world: WorldState,
         tools: list[dict[str, object]],
         memories: list[str],
+        conversation: list[dict[str, str]] | None = None,
     ) -> list[ToolCall]:
         self.validation_errors = []
         for attempt in range(1 + self.max_retries):
             try:
-                result = await self._call_openai(command, world, tools, memories)
+                result = await self._call_openai(command, world, tools, memories, conversation)
                 if self.is_degraded:
                     logger.info("OpenAI recovered, clearing degraded state")
                     self.is_degraded = False
@@ -96,8 +102,8 @@ class OpenAIClient(LLMClient):
                         message=f"OpenAI API error: {exc}",
                     )
                 logger.error("OpenAI unavailable, falling back to MockLLM (degraded mode)")
-                return await self.fallback.plan(command, world, tools, memories)
-        return await self.fallback.plan(command, world, tools, memories)  # pragma: no cover
+                return await self.fallback.plan(command, world, tools, memories, conversation)
+        return await self.fallback.plan(command, world, tools, memories, conversation)  # pragma: no cover
 
     async def _call_openai(
         self,
@@ -105,18 +111,23 @@ class OpenAIClient(LLMClient):
         world: WorldState,
         tools: list[dict[str, object]],
         memories: list[str],
+        conversation: list[dict[str, str]] | None = None,
     ) -> list[ToolCall]:
+        instructions = self._prompt_builder.build_system_prompt(
+            world,
+            backend=self._backend,
+            memories=memories,
+            conversation=conversation,
+        )
+        input_payload: dict[str, Any] = {
+            "command": command,
+            "world": world.cognitive_snapshot(),
+        }
         response = await asyncio.wait_for(
             self.client.responses.create(
                 model=self.model,
-                instructions=(
-                    "Plan robot-dog L3 cognition actions. Select only provided tools. "
-                    "Do not bypass safety constraints. Return tool calls for the next objective."
-                ),
-                input=json.dumps(
-                    {"command": command, "world": world.snapshot(), "recent_memories": memories},
-                    ensure_ascii=False,
-                ),
+                instructions=instructions,
+                input=json.dumps(input_payload, ensure_ascii=False),
                 tools=tools,
             ),
             timeout=self.timeout_seconds,

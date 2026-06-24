@@ -141,7 +141,7 @@ class AgentRuntime:
             elif settings.llm_backend == "openai":
                 from robot_brain.llm.openai_client import OpenAIClient
 
-                llm = OpenAIClient(settings.openai_model, skills=skills)
+                llm = OpenAIClient(settings.openai_model, skills=skills, backend=settings.robot_backend)
             else:
                 raise ValueError(f"unsupported LLM backend: {settings.llm_backend}")
         elif hasattr(llm, "set_skills"):
@@ -173,6 +173,7 @@ class AgentRuntime:
             short_term=ShortTermMemory(),
             long_term=long_term,
             world_states=world_states,
+            conversations=conversations,
         )
         return cls(
             context,
@@ -204,7 +205,7 @@ class AgentRuntime:
             )
         result = self._to_result(final)
         duration = time.monotonic() - start_time
-        self._remember(command, result)
+        self._remember(command, result, duration=duration)
         self._save_execution_summary(command, result, duration)
         self._save_decision_context(command, result, final)
         return result
@@ -347,9 +348,17 @@ class AgentRuntime:
             thread_id=thread_id, world=self.context.world.snapshot(),
         )
 
-    def _remember(self, command: str, result: RunResult) -> None:
+    def _remember(self, command: str, result: RunResult, *, duration: float = 0.0) -> None:
+        # Build a richer summary that includes executed skills and duration
+        task = self.context.world.current_task
+        skills_used = list(task.completed_skills) if task is not None else []
+        if skills_used or duration > 0:
+            skills_str = ", ".join(skills_used) or "none"
+            summary = f"{result.message} [skills: {skills_str}, {duration:.1f}s]"
+        else:
+            summary = result.message
         self.context.short_term.add(f"runtime result for {command!r}: {result.status} ({result.message})")
-        self.context.long_term.add(Experience(objective=command, outcome=result.status, summary=result.message))
+        self.context.long_term.add(Experience(objective=command, outcome=result.status, summary=summary))
         self._record_result(result)
 
     def _record_result(self, result: RunResult) -> None:
@@ -399,6 +408,8 @@ class AgentRuntime:
     def _save_decision_context(self, command: str, result: RunResult, final: GraphState) -> None:
         if result.thread_id is None or self._database is None:
             return
+        import json as _json
+
         experiences = self.context.long_term.search(command, limit=3)
         memory_refs = [exp.summary for exp in experiences]
 
@@ -412,6 +423,9 @@ class AgentRuntime:
         elif result.status == "awaiting_confirmation":
             safety_result = "awaiting_confirmation"
 
+        # Persist the cognitive snapshot for full audit trail
+        world_snapshot = _json.dumps(self.context.world.cognitive_snapshot(), ensure_ascii=False)
+
         self._database.save_decision_context(
             thread_id=result.thread_id,
             command=command,
@@ -421,6 +435,7 @@ class AgentRuntime:
             safety_result=safety_result,
             next_plan="completed" if result.status == "completed" else result.message,
             is_degraded=getattr(self.context.llm, "is_degraded", False),
+            world_snapshot=world_snapshot,
         )
 
     def _save_world(self, reason: str, thread_id: str | None = None) -> None:

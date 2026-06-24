@@ -19,6 +19,7 @@ class MockLLM(LLMClient):
         world: WorldState,
         tools: list[dict[str, object]],
         memories: list[str],
+        conversation: list[dict[str, str]] | None = None,
     ) -> list[ToolCall]:
         if self._scripted_plans:
             return [call.model_copy(deep=True) for call in self._scripted_plans.popleft()]
