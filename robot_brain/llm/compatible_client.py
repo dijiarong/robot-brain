@@ -167,7 +167,11 @@ class CompatibleLLMClient(LLMClient):
         """Convert Responses API tool format to Chat Completions format.
 
         Input:  {"type": "function", "name": ..., "description": ..., "parameters": ..., "strict": ...}
-        Output: {"type": "function", "function": {"name": ..., "description": ..., "parameters": ..., "strict": ...}}
+        Output: {"type": "function", "function": {"name": ..., "description": ..., "parameters": ...}}
+
+        Note: ``strict`` is intentionally dropped — it is an OpenAI Responses API
+        feature and not part of the Chat Completions standard. Third-party
+        providers (DeepSeek, Ollama, vLLM) may reject or ignore it.
         """
         result: list[dict[str, object]] = []
         for t in tools:
@@ -176,8 +180,6 @@ class CompatibleLLMClient(LLMClient):
                 "description": t["description"],
                 "parameters": t["parameters"],
             }
-            if "strict" in t:
-                func_def["strict"] = t["strict"]
             result.append({"type": "function", "function": func_def})
         return result
 

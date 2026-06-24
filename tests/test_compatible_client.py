@@ -72,15 +72,18 @@ class TestToolConversion(unittest.TestCase):
         self.assertEqual(func["name"], "nudge")
         self.assertEqual(func["description"], "Move forward")
         self.assertEqual(func["parameters"], {"type": "object", "properties": {}})
-        self.assertTrue(func["strict"])
+        # strict is intentionally dropped for compatible providers
+        self.assertNotIn("strict", func)
 
-    def test_convert_without_strict(self) -> None:
+    def test_strict_always_stripped(self) -> None:
+        """Even when source has strict=True, it should be stripped for compatibility."""
         tools_input = [
             {
                 "type": "function",
                 "name": "stop",
                 "description": "Stop",
                 "parameters": {},
+                "strict": True,
             }
         ]
         result = CompatibleLLMClient._convert_tools(tools_input)
@@ -272,6 +275,23 @@ class TestRuntimeRegistration(unittest.TestCase):
         )
         self.assertEqual(llm._backend, "unitree")
         self.assertIs(llm._settings, settings)
+
+    def test_runtime_factory_compatible_backend(self) -> None:
+        """AgentRuntime.create with llm_backend=compatible creates CompatibleLLMClient."""
+        settings = Settings()
+        object.__setattr__(settings, "llm_backend", "compatible")
+        object.__setattr__(settings, "openai_model", "deepseek-chat")
+
+        # Patch at the import site inside the factory to avoid real openai import.
+        mock_async_openai = MagicMock()
+        with unittest.mock.patch.dict(
+            "sys.modules",
+            {"openai": MagicMock(AsyncOpenAI=mock_async_openai)},
+        ):
+            runtime = AgentRuntime.create(settings=settings)
+
+        self.assertIsInstance(runtime.context.llm, CompatibleLLMClient)
+        self.assertEqual(runtime.context.llm.model, "deepseek-chat")
 
 
 if __name__ == "__main__":

@@ -18,6 +18,7 @@
 - [第十一次迭代：Go2 原生技能族](./2026-06-14-000000-go2-skill-family.md)：nudge/scan/retreat 分段 drive 映射 LLM tool；代码/测试完成，真机待现场。
 - [第十二次迭代：Go2 快反规则 + 后端工具过滤](./2026-06-15-120000-go2-fast-reflex-and-tool-filter.md)：FastReflex 读 robot_self_state；unitree 后端 LLM tool 白名单；代码/测试完成，真机待现场。
 - [第十四次迭代：认知增强 — LLM 感知 + 自主决策升级](./2026-06-24-140000-cognitive-enhancement.md)：PromptBuilder 可组合提示、cognitive_snapshot 状态解读、对话历史注入、状态感知决策策略；代码/测试完成。
+- [第十五次迭代：OpenAI 兼容 Chat Completions 适配器](./2026-06-24-150000-compatible-llm-backend.md)：新增 `RDB_LLM=compatible` 后端，走标准 Chat Completions + tools API，覆盖 DeepSeek / Ollama / vLLM / LM Studio；代码/测试完成。
 
 ## 后续方向池
 
