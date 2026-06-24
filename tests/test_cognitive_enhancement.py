@@ -146,3 +146,8 @@ class TestEnrichedExperience:
         exp = experiences[0]
         # Should contain skill names or duration info
         assert exp.summary  # Non-empty
+        summary_lower = exp.summary.lower()
+        # Verify enriched content: skill reference or duration marker
+        assert any(
+            kw in summary_lower for kw in ("skill", "nudge", "navigate", "completed")
+        ), f"Expected skill/duration info in summary, got: {exp.summary}"

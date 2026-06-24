@@ -65,8 +65,15 @@
 ## 验证方式
 
 - [x] 39 新测试全部通过 (test_prompt_builder + test_cognitive_enhancement)
-- [x] 全量 340 测试通过，0 回归
-- [ ] 手动验证：设置 RDB_LLM=openai 后 LLM 能基于状态做合理决策
+- [x] 全量 355 测试通过，0 回归（含 StateInterpreter 16 个新测试）
+- [x] 手动验证：设置 RDB_LLM=openai 后 LLM 能基于状态做合理决策 → 见 [`docs/verification-record-iter14.md`](../verification-record-iter14.md)
+
+### 后续重构（同迭代 review 修复）
+
+- [x] P1-P3: 引入 `StateInterpreter`，阈值统一从 Settings 读取，消除硬编码和逻辑重复
+- [x] P4: `ROLE_TEMPLATE` 按 backend 动态切换（mock 用 generic，unitree 用 Go2）
+- [x] P7: `chosen_skills` → `executed_skills` 修正语义
+- [x] P8: 对话截断层级配置化（`max_conversation_context` 进 Settings）
 
 ## 复盘
 

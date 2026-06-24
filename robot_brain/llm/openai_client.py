@@ -29,6 +29,7 @@ class OpenAIClient(LLMClient):
         skills: SkillRegistry | None = None,
         backend: str = "mock",
         prompt_builder: PromptBuilder | None = None,
+        settings: Any | None = None,
     ) -> None:
         if client is None:
             try:
@@ -46,7 +47,8 @@ class OpenAIClient(LLMClient):
         self._fallback: LLMClient | None = None
         self._validator: LLMOutputValidator | None = None
         self._backend = backend
-        self._prompt_builder = prompt_builder or PromptBuilder()
+        self._settings = settings
+        self._prompt_builder = prompt_builder or PromptBuilder(settings=settings)
         if skills is not None:
             self._validator = LLMOutputValidator(skills)
 
@@ -121,7 +123,7 @@ class OpenAIClient(LLMClient):
         )
         input_payload: dict[str, Any] = {
             "command": command,
-            "world": world.cognitive_snapshot(),
+            "world": world.cognitive_snapshot(self._settings),
         }
         response = await asyncio.wait_for(
             self.client.responses.create(

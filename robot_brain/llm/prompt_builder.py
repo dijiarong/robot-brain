@@ -5,31 +5,36 @@ decision policies, tool guidance, memories, and conversation history.
 """
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+from robot_brain.core.state_interpreter import StateInterpreter
 from robot_brain.core.world_state import WorldState
 from robot_brain.llm.prompts.templates import (
     CONVERSATION_TEMPLATE,
     MEMORY_TEMPLATE,
     POLICIES_TEMPLATE,
-    POLICY_CRITICAL_BATTERY,
-    POLICY_ERROR,
-    POLICY_ESTOP,
-    POLICY_LOW_BATTERY,
-    POLICY_NORMAL,
-    POLICY_NOT_STANDING,
-    POLICY_OBSTACLE_FRONT,
-    POLICY_OBSTACLE_REAR,
-    POLICY_STALE,
     ROBOT_STATE_BLOCK_TEMPLATE,
     ROLE_TEMPLATE,
+    ROLE_TEMPLATE_GENERIC,
     STATE_TEMPLATE,
     TOOLS_GUIDANCE_TEMPLATE,
 )
+
+if TYPE_CHECKING:
+    from config.settings import Settings
 
 
 class PromptBuilder:
     """Builds a structured, state-aware system prompt for the LLM planner."""
 
-    def __init__(self, *, max_conversation_turns: int = 5, max_memories: int = 5) -> None:
+    def __init__(
+        self,
+        *,
+        settings: "Settings | None" = None,
+        max_conversation_turns: int = 5,
+        max_memories: int = 5,
+    ) -> None:
+        self._settings = settings
         self.max_conversation_turns = max_conversation_turns
         self.max_memories = max_memories
 
@@ -41,10 +46,14 @@ class PromptBuilder:
         conversation: list[dict[str, str]] | None = None,
     ) -> str:
         """Assemble the full system instruction for the LLM."""
+        # Build unified interpretation once (P1+P2: single source of truth).
+        interpreter = self._get_interpreter()
+        interpretation = interpreter.interpret(world)
+
         sections = [
-            self._role_section(),
-            self._state_section(world),
-            self._policies_section(world),
+            self._role_section(backend),
+            self._state_section(world, interpretation.summary),
+            self._policies_section(interpretation.active_policies),
             self._tools_guidance_section(backend),
         ]
         if memories:
@@ -53,12 +62,21 @@ class PromptBuilder:
             sections.append(self._conversation_section(conversation))
         return "\n\n".join(sections)
 
-    def _role_section(self) -> str:
-        return ROLE_TEMPLATE
+    def _get_interpreter(self) -> StateInterpreter:
+        if self._settings is not None:
+            return StateInterpreter(self._settings)
+        from config.settings import Settings
+        return StateInterpreter(Settings())
 
-    def _state_section(self, world: WorldState) -> str:
-        summary = world._build_state_summary()
-        state_summary_lines = "\n".join(f"  {k}: {v}" for k, v in summary.items()) or "  No issues detected."
+    def _role_section(self, backend: str) -> str:
+        if backend == "unitree":
+            return ROLE_TEMPLATE
+        return ROLE_TEMPLATE_GENERIC
+
+    def _state_section(self, world: WorldState, summary: dict[str, str]) -> str:
+        state_summary_lines = (
+            "\n".join(f"  {k}: {v}" for k, v in summary.items()) or "  No issues detected."
+        )
 
         robot_state_block = ""
         ss = world.robot_self_state
@@ -81,36 +99,8 @@ class PromptBuilder:
             robot_state_block=robot_state_block,
         )
 
-    def _policies_section(self, world: WorldState) -> str:
-        policies: list[str] = []
-
-        # Priority-ordered policy selection based on current state
-        if world.estop_active:
-            policies.append(POLICY_ESTOP)
-
-        if world.battery_level <= 10:
-            policies.append(POLICY_CRITICAL_BATTERY)
-        elif world.battery_level <= 25:
-            policies.append(POLICY_LOW_BATTERY)
-
-        ss = world.robot_self_state
-        if ss is not None:
-            if ss.error_code is not None and ss.error_code != 0:
-                policies.append(POLICY_ERROR)
-            if ss.is_standing is False:
-                policies.append(POLICY_NOT_STANDING)
-            if ss.state_age_seconds is not None and ss.state_age_seconds > 2.0:
-                policies.append(POLICY_STALE)
-            if ss.ultrasonic:
-                if ss.ultrasonic.front_m is not None and ss.ultrasonic.front_m < 0.3:
-                    policies.append(POLICY_OBSTACLE_FRONT)
-                if ss.ultrasonic.rear_m is not None and ss.ultrasonic.rear_m < 0.3:
-                    policies.append(POLICY_OBSTACLE_REAR)
-
-        if not policies:
-            policies.append(POLICY_NORMAL)
-
-        return POLICIES_TEMPLATE.format(active_policies="\n".join(policies))
+    def _policies_section(self, active_policies: list[str]) -> str:
+        return POLICIES_TEMPLATE.format(active_policies="\n".join(active_policies))
 
     def _tools_guidance_section(self, backend: str) -> str:
         if backend == "unitree":

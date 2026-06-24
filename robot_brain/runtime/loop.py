@@ -141,7 +141,15 @@ class AgentRuntime:
             elif settings.llm_backend == "openai":
                 from robot_brain.llm.openai_client import OpenAIClient
 
-                llm = OpenAIClient(settings.openai_model, skills=skills, backend=settings.robot_backend)
+                from robot_brain.llm.prompt_builder import PromptBuilder
+
+                llm = OpenAIClient(
+                    settings.openai_model,
+                    skills=skills,
+                    backend=settings.robot_backend,
+                    prompt_builder=PromptBuilder(settings=settings),
+                    settings=settings,
+                )
             else:
                 raise ValueError(f"unsupported LLM backend: {settings.llm_backend}")
         elif hasattr(llm, "set_skills"):
@@ -413,9 +421,9 @@ class AgentRuntime:
         experiences = self.context.long_term.search(command, limit=3)
         memory_refs = [exp.summary for exp in experiences]
 
-        # Gather skill names from world state task progress
+        # Gather executed skill names from world state task progress
         task = self.context.world.current_task
-        chosen_skills = list(task.completed_skills) if task is not None else []
+        executed_skills = list(task.completed_skills) if task is not None else []
 
         safety_result = "allowed"
         if result.status == "blocked":
@@ -424,12 +432,14 @@ class AgentRuntime:
             safety_result = "awaiting_confirmation"
 
         # Persist the cognitive snapshot for full audit trail
-        world_snapshot = _json.dumps(self.context.world.cognitive_snapshot(), ensure_ascii=False)
+        world_snapshot = _json.dumps(
+            self.context.world.cognitive_snapshot(self.context.settings), ensure_ascii=False
+        )
 
         self._database.save_decision_context(
             thread_id=result.thread_id,
             command=command,
-            chosen_skills=chosen_skills,
+            chosen_skills=executed_skills,
             reason=result.decision_source or "planner",
             memory_refs=memory_refs,
             safety_result=safety_result,

@@ -45,7 +45,8 @@ class OrchestrationNodes:
         """Extract recent dialogue turns for LLM context."""
         if not thread_id:
             return None
-        messages = self.context.conversations.recent(thread_id, limit=10)
+        limit = self.context.settings.max_conversation_context
+        messages = self.context.conversations.recent(thread_id, limit=limit)
         turns = [
             {"role": msg.role, "content": msg.content}
             for msg in messages

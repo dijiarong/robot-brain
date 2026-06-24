@@ -30,11 +30,13 @@ class Settings:
     max_step_distance: float = 30.0
     require_confirmation_for: tuple[str, ...] = ("follow", "nudge", "scan", "retreat")
     object_ttl_seconds: float = 30.0
+    obstacle_proximity_threshold: float = 0.3  # metres — ultrasonic proximity alert
 
     # Runtime.
     max_loop_iterations: int = 50
     default_task_max_attempts: int = 2
     enable_verbose_log: bool = field(default_factory=lambda: _env_bool("RDB_VERBOSE", True))
+    max_conversation_context: int = 10  # max messages fetched from DB for LLM context
 
     # Local persistence.
     memory_db_path: str = field(default_factory=lambda: os.getenv("RDB_MEMORY_DB", "data/robot_brain.sqlite3"))

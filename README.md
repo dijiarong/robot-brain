@@ -202,10 +202,10 @@ $env:RDB_MEMORY_DB = "D:\robot-data\robot_brain.sqlite3"
 
 更多 Unitree 变量（限速、watchdog、Move/摇杆策略等）见 [`docs/unitree-setup.md`](./docs/unitree-setup.md) 与 `config/settings.py`。
 
-项目测试基于标准库 `unittest`，无需额外测试框架即可运行：
+项目测试基于 `pytest`（部分用例使用 `pytest-asyncio`）：
 
-```powershell
-python -m unittest discover -s tests -v
+```bash
+python -m pytest tests/ -q
 python -m compileall -q robot_brain config tests examples
 ```
 
