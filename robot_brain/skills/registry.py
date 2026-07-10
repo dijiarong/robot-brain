@@ -54,12 +54,13 @@ class SkillRegistry:
     ) -> list[dict[str, object]]:
         """Return tools filtered for *backend*.
 
+        Delegates to :class:`robot_brain.planning.catalog.PlannerCatalog` so the
+        planner-visible filtering logic has a single home. The catalog is
+        imported lazily to avoid a module-level cycle (it imports this module).
+
         On ``unitree``, generic motion skills (navigate / patrol / follow /
         dock) are excluded from the LLM tool list.
         """
-        if backend == "unitree":
-            return [
-                t for t in self.tools(strict=strict)
-                if t["name"] in UNITREE_LLM_SKILLS
-            ]
-        return self.tools(strict=strict)
+        from robot_brain.planning.catalog import PlannerCatalog
+
+        return PlannerCatalog(self, backend).planner_tools(strict=strict)

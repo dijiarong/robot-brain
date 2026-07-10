@@ -16,6 +16,8 @@ from robot_brain.actuation.base import RobotInterface
 from robot_brain.actuation.unitree import UnitreeRobot
 from robot_brain.core.world_state import WorldState
 from robot_brain.skills.base import Skill, SkillResult
+from robot_brain.tools.base import CapabilityMetadata, ToolContext
+from robot_brain.tools.builtin.control import Go2DriveSegmentParams, Go2DriveSegmentTool
 
 from . import go2_motion
 
@@ -106,6 +108,16 @@ class NudgeSkill(_Go2Skill):
     )
     params_model = NudgeParams
 
+    def __init__(self, settings: Settings, *, drive_tool: Go2DriveSegmentTool | None = None) -> None:
+        super().__init__(settings)
+        self._tool = drive_tool or Go2DriveSegmentTool()
+
+    @property
+    def capability_metadata(self) -> CapabilityMetadata:
+        # Delegate safety semantics to the low-level motion tool: linear motion,
+        # unitree-only, requires confirmation. SafetyPolicy enforces these.
+        return self._tool.metadata
+
     async def _execute_go2(
         self,
         params: NudgeParams,  # type: ignore[override]
@@ -132,19 +144,31 @@ class NudgeSkill(_Go2Skill):
         else:  # right
             vx, vy = 0.0, -go2_motion.LINEAR_SPEED
 
-        result = await go2_motion.run_go2_drive_segments(
-            robot, vx=vx, vy=vy, durations=durations,
-        )
+        # NudgeSkill owns distance/direction/segment semantics; the low-level
+        # tool owns one timed drive. Call it per segment and aggregate the
+        # audit dict in the same shape run_go2_drive_segments produced.
+        ctx = ToolContext(settings=self._settings, world=world, robot=robot)
+        segments: list[dict[str, Any]] = []
+        success = True
+        for i, d in enumerate(durations):
+            tool_params = Go2DriveSegmentParams(vx=vx, vy=vy, vyaw=0.0, duration=d)
+            seg_result = await self._tool.execute(tool_params, ctx)
+            segments.append({"index": i, **seg_result.data})
+            if not seg_result.success:
+                success = False
+                break
 
         return SkillResult(
-            success=result["success"],
+            success=success,
             message=f"nudge {params.direction} {distance_cm:.0f}cm"
-                    f"{' ✓' if result['success'] else ' ✗'}",
+                    f"{' ✓' if success else ' ✗'}",
             data={
                 "skill": "nudge",
                 "requested": requested,
                 "clamped": clamped,
-                **result,
+                "segments": segments,
+                "segment_count": len(segments),
+                "success": success,
             },
         )
 
@@ -253,11 +277,16 @@ class RetreatSkill(_Go2Skill):
 # Factory
 # ---------------------------------------------------------------------------
 
-def go2_skills(settings: Settings, *, perception: Any | None = None) -> list[Skill]:
+def go2_skills(
+    settings: Settings,
+    *,
+    perception: Any | None = None,
+    drive_tool: Go2DriveSegmentTool | None = None,
+) -> list[Skill]:
     from robot_brain.skills.builtin.explore import ExploreSkill
 
     return [
-        NudgeSkill(settings),
+        NudgeSkill(settings, drive_tool=drive_tool),
         ScanSkill(settings),
         RetreatSkill(settings),
         ExploreSkill(settings, perception=perception),

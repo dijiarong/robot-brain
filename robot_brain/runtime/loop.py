@@ -39,6 +39,8 @@ from robot_brain.safety.validator import SafetyValidator
 from robot_brain.skills.base import SkillResult
 from robot_brain.skills.builtin import default_skills
 from robot_brain.skills.registry import SkillRegistry
+from robot_brain.tools.builtin import default_tools
+from robot_brain.tools.registry import ToolRegistry
 
 
 class RunResult(BaseModel):
@@ -131,12 +133,24 @@ class AgentRuntime:
                 raise ValueError(f"unsupported perception backend: {settings.perception_backend}")
         if settings.robot_backend == "unitree":
             from robot_brain.skills.builtin.go2_catalog import go2_skills
+            from robot_brain.tools.builtin import go2_tools
 
-            skills = SkillRegistry(default_skills() + go2_skills(settings, perception=perception))
+            tool_registry = ToolRegistry(default_tools() + go2_tools())
+            stop_tool = tool_registry.get("stop_motion")
+            drive_tool = tool_registry.get("go2_drive_segment")
+            skills = SkillRegistry(
+                default_skills(stop_tool=stop_tool)
+                + go2_skills(settings, perception=perception, drive_tool=drive_tool)
+            )
         else:
             from robot_brain.skills.builtin.explore import ExploreSkill
 
-            skills = SkillRegistry(default_skills() + [ExploreSkill(settings, perception=perception)])
+            tool_registry = ToolRegistry(default_tools())
+            stop_tool = tool_registry.get("stop_motion")
+            skills = SkillRegistry(
+                default_skills(stop_tool=stop_tool)
+                + [ExploreSkill(settings, perception=perception)]
+            )
         if llm is None:
             if settings.llm_backend == "mock":
                 llm = MockLLM()
@@ -194,6 +208,7 @@ class AgentRuntime:
             long_term=long_term,
             world_states=world_states,
             conversations=conversations,
+            tools=tool_registry,
         )
         return cls(
             context,

@@ -5,9 +5,12 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from config.settings import Settings
 from robot_brain.actuation.base import RobotInterface
 from robot_brain.core.world_state import Position, WorldState
 from robot_brain.skills.base import Skill, SkillResult
+from robot_brain.tools.base import CapabilityMetadata, ToolContext
+from robot_brain.tools.builtin.control import StopMotionTool
 
 
 class NavigateParams(BaseModel):
@@ -116,19 +119,46 @@ class StopParams(BaseModel):
 
 
 class StopSkill(Skill):
+    """Stop robot motion by delegating to the low-level ``StopMotionTool``.
+
+    The skill remains the planner-facing unit (LLM tool name ``stop``); the
+    safety semantics (motion_kind=stop, always allowed during estop/low
+    battery) live on the tool's :class:`CapabilityMetadata`, surfaced to the
+    validator via the ``capability_metadata`` property.
+    """
+
     name = "stop"
     description = "Immediately stop robot motion."
     params_model = StopParams
+
+    def __init__(
+        self,
+        *,
+        settings: Settings | None = None,
+        stop_tool: StopMotionTool | None = None,
+    ) -> None:
+        self._settings = settings
+        self._tool = stop_tool or StopMotionTool()
+
+    @property
+    def capability_metadata(self) -> CapabilityMetadata:
+        return self._tool.metadata
 
     def preconditions(self, world: WorldState) -> bool:
         return True
 
     async def execute(self, params: StopParams, robot: RobotInterface, world: WorldState) -> SkillResult:
-        await robot.stop(params.reason)
-        return SkillResult(success=True, message=f"stopped: {params.reason}")
+        ctx = ToolContext(settings=self._settings, world=world, robot=robot)
+        tool_params = self._tool.parse_params(params.model_dump(mode="json"))
+        result = await self._tool.execute(tool_params, ctx)
+        return SkillResult(
+            success=result.success,
+            message=result.message,
+            data=result.data,
+        )
 
 
-def default_skills() -> list[Skill]:
+def default_skills(*, stop_tool: StopMotionTool | None = None) -> list[Skill]:
     return [
         NavigateSkill(),
         PatrolSkill(),
@@ -136,5 +166,5 @@ def default_skills() -> list[Skill]:
         FollowSkill(),
         DockSkill(),
         ReportSkill(),
-        StopSkill(),
+        StopSkill(stop_tool=stop_tool),
     ]

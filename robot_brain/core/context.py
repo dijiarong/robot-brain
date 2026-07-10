@@ -15,6 +15,7 @@ from robot_brain.perception.base import PerceptionAdapter
 from robot_brain.safety.estop import EmergencyStop
 from robot_brain.safety.validator import SafetyValidator
 from robot_brain.skills.registry import SkillRegistry
+from robot_brain.tools.registry import ToolRegistry
 
 
 @dataclass
@@ -31,3 +32,6 @@ class AgentContext:
     long_term: LongTermMemory
     world_states: WorldStateMemory
     conversations: ConversationMemory = field(default_factory=ConversationMemory)
+    #: Runtime-internal atomic tools. Skills delegate to these; the
+    #: PlannerCatalog may expose a safe subset to the LLM in future iterations.
+    tools: ToolRegistry | None = None

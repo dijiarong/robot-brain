@@ -19,10 +19,12 @@
 - [第十二次迭代：Go2 快反规则 + 后端工具过滤](./2026-06-15-120000-go2-fast-reflex-and-tool-filter.md)：FastReflex 读 robot_self_state；unitree 后端 LLM tool 白名单；代码/测试完成，真机待现场。
 - [第十四次迭代：认知增强 — LLM 感知 + 自主决策升级](./2026-06-24-140000-cognitive-enhancement.md)：PromptBuilder 可组合提示、cognitive_snapshot 状态解读、对话历史注入、状态感知决策策略；代码/测试完成。
 - [第十五次迭代：OpenAI 兼容 Chat Completions 适配器](./2026-06-24-150000-compatible-llm-backend.md)：新增 `RDB_LLM=compatible` 后端，走标准 Chat Completions + tools API，覆盖 DeepSeek / Ollama / vLLM / LM Studio；代码/测试完成。
+- [第十六次迭代：有限步探索模式（Bounded Explore）](./2026-06-24-160000-bounded-explore-mode.md)：composite `explore` 技能（scan/nudge/retreat 规则循环 + 硬停止条件）；mock/fake 可验收，真机 dry-run → live。
 
 ## 进行中 / 计划中
 
-- [第十六次迭代：有限步探索模式（Bounded Explore）](./2026-06-24-160000-bounded-explore-mode.md)：composite `explore` 技能（scan/nudge/retreat 规则循环 + 硬停止条件）；mock/fake 可验收，真机 dry-run → live；不含 SLAM/frontier。
+- [第十七次迭代：本地 VLM 可通行性 Hint](./2026-06-24-170000-vlm-passability-hint.md)：对接局域网 Qwen3-VL-8B（OpenAI 兼容 multimodal API），输出 `PassabilityHint` 供 `explore` 软选向；超声波仍硬否决；不自训模型、不做 SLAM。
+- [能力底座 - Tool / Skill / Policy / Catalog 契约](./2026-07-10-170002-capability-foundation-tool-skill-contract.md)：四层能力分层（Tool 原子能力 / Skill 行为语义 / Policy 安全边界 / Catalog 规划器视图），迁移 stop + nudge 纵切，`SafetyPolicy` 按 metadata 判定；代码/测试完成，fake/dry-run 可验收。
 
 ## 后续方向池
 

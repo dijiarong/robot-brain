@@ -1,4 +1,12 @@
-"""Deterministic veto layer between planning and actuation."""
+"""Deterministic veto layer between planning and actuation.
+
+Capabilities that carry :class:`robot_brain.tools.base.CapabilityMetadata`
+(migrated tools/skills) are checked by :class:`SafetyPolicy`, which keys off
+metadata (risk level, motion kind, backend allowlist, confirmation) rather than
+skill names. Non-migrated skills keep the legacy name-based path so migration
+is gradual - the two paths do not duplicate knowledge, they cover disjoint
+capability sets.
+"""
 from __future__ import annotations
 
 from typing import Any
@@ -9,6 +17,7 @@ from config.settings import Settings
 from robot_brain.core.errors import ErrorCode
 from robot_brain.core.world_state import Position, WorldState
 from robot_brain.llm.base import ToolCall
+from robot_brain.safety.policy import CapabilityMetadata, SafetyPolicy
 from robot_brain.skills.registry import SkillRegistry, UNITREE_HIDDEN_SKILLS
 
 
@@ -26,6 +35,7 @@ class SafetyValidator:
     def __init__(self, settings: Settings, skills: SkillRegistry) -> None:
         self.settings = settings
         self.skills = skills
+        self.policy = SafetyPolicy(settings)
 
     def validate(
         self,
@@ -42,14 +52,29 @@ class SafetyValidator:
                 error_code=ErrorCode.SAFETY_NOT_WHITELISTED,
             )
 
-        backend_err = self._validate_backend(call.skill_name)
-        if backend_err:
-            return ValidationResult(
-                allowed=False,
-                reason=backend_err,
-                error_code=ErrorCode.SAFETY_NOT_WHITELISTED,
-            )
+        metadata = self._metadata_for(skill)
 
+        # 1. backend ----------------------------------------------------------
+        # Migrated capabilities use the policy; others keep the legacy
+        # name-based hidden-skill check. Both run before param parsing.
+        if metadata is not None:
+            decision = self.policy.check_backend(metadata, self.settings.robot_backend)
+            if not decision.allowed:
+                return ValidationResult(
+                    allowed=False,
+                    reason=decision.reason,
+                    error_code=decision.error_code,
+                )
+        else:
+            backend_err = self._validate_backend(call.skill_name)
+            if backend_err:
+                return ValidationResult(
+                    allowed=False,
+                    reason=backend_err,
+                    error_code=ErrorCode.SAFETY_NOT_WHITELISTED,
+                )
+
+        # 2. parameter parsing ------------------------------------------------
         try:
             params = skill.parse_params(call.parameters)
         except ValidationError as exc:
@@ -60,21 +85,33 @@ class SafetyValidator:
             )
         normalized = params.model_dump(mode="json")
 
-        if world.estop_active and call.skill_name not in self.ALWAYS_ALLOWED:
-            return ValidationResult(
-                allowed=False,
-                reason="emergency stop is active",
-                error_code=ErrorCode.SAFETY_ESTOP_ACTIVE,
-            )
-        if (
-            world.battery_level <= self.settings.critical_battery_threshold
-            and call.skill_name not in self.ALWAYS_ALLOWED
-        ):
-            return ValidationResult(
-                allowed=False,
-                reason="critical battery only permits stop, dock, or report",
-                error_code=ErrorCode.SAFETY_BATTERY_CRITICAL,
-            )
+        # 3. emergency stop / critical battery --------------------------------
+        if metadata is not None:
+            decision = self.policy.check_state(metadata, world)
+            if not decision.allowed:
+                return ValidationResult(
+                    allowed=False,
+                    reason=decision.reason,
+                    error_code=decision.error_code,
+                )
+        else:
+            if world.estop_active and call.skill_name not in self.ALWAYS_ALLOWED:
+                return ValidationResult(
+                    allowed=False,
+                    reason="emergency stop is active",
+                    error_code=ErrorCode.SAFETY_ESTOP_ACTIVE,
+                )
+            if (
+                world.battery_level <= self.settings.critical_battery_threshold
+                and call.skill_name not in self.ALWAYS_ALLOWED
+            ):
+                return ValidationResult(
+                    allowed=False,
+                    reason="critical battery only permits stop, dock, or report",
+                    error_code=ErrorCode.SAFETY_BATTERY_CRITICAL,
+                )
+
+        # 4. preconditions ----------------------------------------------------
         if not skill.preconditions(world):
             return ValidationResult(
                 allowed=False,
@@ -82,6 +119,7 @@ class SafetyValidator:
                 error_code=ErrorCode.SAFETY_PRECONDITION_FAILED,
             )
 
+        # 5. motion-range checks (name-based; applies to all skills) ----------
         error = self._validate_motion(call.skill_name, normalized, world)
         if error:
             return ValidationResult(
@@ -89,7 +127,21 @@ class SafetyValidator:
                 reason=error,
                 error_code=ErrorCode.SAFETY_MOTION_VIOLATION,
             )
-        if call.skill_name in self.settings.require_confirmation_for and not confirmation_granted:
+
+        # 6. operator confirmation (LAST) -------------------------------------
+        # Run after param/motion checks so we never ask an operator to confirm
+        # an action that is already illegal (e.g. out-of-range distance).
+        if metadata is not None:
+            decision = self.policy.check_confirmation(metadata, confirmation_granted)
+            if not decision.allowed:
+                return ValidationResult(
+                    allowed=False,
+                    reason=decision.reason,
+                    error_code=decision.error_code,
+                    requires_confirmation=decision.requires_confirmation,
+                    normalized_parameters=normalized,
+                )
+        elif call.skill_name in self.settings.require_confirmation_for and not confirmation_granted:
             return ValidationResult(
                 allowed=False,
                 reason=f"{call.skill_name} requires operator confirmation",
@@ -98,6 +150,11 @@ class SafetyValidator:
                 normalized_parameters=normalized,
             )
         return ValidationResult(allowed=True, normalized_parameters=normalized)
+
+    @staticmethod
+    def _metadata_for(skill: object) -> CapabilityMetadata | None:
+        """Return a migrated capability's metadata, or ``None`` for legacy skills."""
+        return getattr(skill, "capability_metadata", None)
 
     def _validate_motion(self, skill_name: str, params: dict[str, Any], world: WorldState) -> str:
         if skill_name == "navigate":

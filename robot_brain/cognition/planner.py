@@ -6,6 +6,7 @@ from robot_brain.llm.base import LLMClient, ToolCall
 from robot_brain.llm.output_validator import LLMOutputValidator
 from robot_brain.memory.long_term import LongTermMemory
 from robot_brain.memory.short_term import ShortTermMemory
+from robot_brain.planning.catalog import PlannerCatalog
 from robot_brain.skills.registry import SkillRegistry
 
 
@@ -18,12 +19,14 @@ class Planner:
         long_term: LongTermMemory,
         *,
         backend: str = "mock",
+        catalog: PlannerCatalog | None = None,
     ) -> None:
         self.llm = llm
         self.skills = skills
         self.short_term = short_term
         self.long_term = long_term
         self._backend = backend
+        self.catalog = catalog or PlannerCatalog(skills, backend)
         self._validator = LLMOutputValidator(skills)
 
     async def plan(
@@ -31,7 +34,7 @@ class Planner:
     ) -> list[ToolCall]:
         experiences = self.long_term.search(command)
         memories = self.short_term.recent() + [item.summary for item in experiences]
-        tools = self.skills.tools_for_backend(self._backend)
+        tools = self.catalog.planner_tools()
         calls = await self.llm.plan(command, world, tools, memories, conversation=conversation)
         calls, errors = self._validator.validate_tool_calls(calls)
         for error in errors:
