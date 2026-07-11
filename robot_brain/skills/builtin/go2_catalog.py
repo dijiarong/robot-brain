@@ -282,6 +282,7 @@ def go2_skills(
     *,
     perception: Any | None = None,
     drive_tool: Go2DriveSegmentTool | None = None,
+    passability: Any | None = None,
 ) -> list[Skill]:
     from robot_brain.skills.builtin.explore import ExploreSkill
 
@@ -289,5 +290,5 @@ def go2_skills(
         NudgeSkill(settings, drive_tool=drive_tool),
         ScanSkill(settings),
         RetreatSkill(settings),
-        ExploreSkill(settings, perception=perception),
+        ExploreSkill(settings, perception=perception, passability=passability),
     ]

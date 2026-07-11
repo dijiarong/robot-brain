@@ -19,7 +19,7 @@ from robot_brain.llm.mock import MockLLM
 from robot_brain.memory.conversation import ConversationMemory
 from robot_brain.memory.execution_summary import ExecutionSummary, ExecutionSummaryStore, InMemoryExecutionSummaryStore
 from robot_brain.memory.long_term import Experience, LongTermMemory
-from robot_brain.memory.semantic_store import SemanticExperienceStore, SQLiteSemanticStore
+from robot_brain.memory.semantic_store import SQLiteSemanticStore
 from robot_brain.memory.short_term import ShortTermMemory
 from robot_brain.memory.sqlite_store import SQLiteMemoryStore
 from robot_brain.memory.task_queue import TaskQueue
@@ -43,6 +43,35 @@ from robot_brain.tools.builtin import default_tools
 from robot_brain.tools.registry import ToolRegistry
 
 
+def _build_passability(settings: Settings) -> tuple[Any | None, Any | None]:
+    """Build a VLM PassabilityAnalyzer when ``RDB_VLM_ENABLED`` is on.
+
+    Returns ``(analyzer, frame_source)`` - both ``None`` when VLM is disabled
+    (the default), so explore behaves exactly as in iteration 16. The frame
+    source is a still image when ``RDB_VLM_FRAME_PATH`` is set, otherwise a Go2
+    WebRTC tap (unitree+webrtc) or a NullFrameSource (graceful fallback).
+    The frame_source is returned separately so a service can register the Go2
+    tap after ``await conn.connect()``.
+    """
+    if not settings.vlm_enabled:
+        return None, None
+    from robot_brain.vlm.client import VLMClient
+    from robot_brain.vlm.frame_source import FileFrameSource, NullFrameSource
+    from robot_brain.vlm.passability import PassabilityAnalyzer
+
+    if settings.vlm_frame_path:
+        frame_source: Any = FileFrameSource(settings.vlm_frame_path)
+    elif settings.robot_backend == "unitree" and settings.unitree_transport == "webrtc":
+        from robot_brain.vlm.frame_source import Go2VideoFrameSource
+
+        frame_source = Go2VideoFrameSource()
+    else:
+        frame_source = NullFrameSource()
+
+    client = VLMClient(settings)
+    return PassabilityAnalyzer(client, frame_source, settings), frame_source
+
+
 class RunResult(BaseModel):
     status: str
     message: str = ""
@@ -62,12 +91,16 @@ class AgentRuntime:
         database: SQLiteMemoryStore | None = None,
         tasks: TaskQueue | None = None,
         summaries: ExecutionSummaryStore | None = None,
+        passability_frame_source: Any | None = None,
     ) -> None:
         self.context = context
         self.checkpoints = checkpoints or CheckpointStore()
         self.conversations = conversations or ConversationMemory()
         self.tasks = tasks or TaskQueue()
         self.summaries = summaries or InMemoryExecutionSummaryStore()
+        #: Go2 VLM frame source (None unless unitree+webrtc+VLM); a service
+        #: registers the WebRTC tap via attach_passability_tap() after connect.
+        self.passability_frame_source = passability_frame_source
         self._database = database
         self._restored_threads: set[str] = set()
         self.graph: BrainGraph = build_graph(context)
@@ -131,6 +164,7 @@ class AgentRuntime:
                 perception = UnitreePerceptionAdapter(robot)
             else:
                 raise ValueError(f"unsupported perception backend: {settings.perception_backend}")
+        passability, passability_frame_source = _build_passability(settings)
         if settings.robot_backend == "unitree":
             from robot_brain.skills.builtin.go2_catalog import go2_skills
             from robot_brain.tools.builtin import go2_tools
@@ -140,7 +174,12 @@ class AgentRuntime:
             drive_tool = tool_registry.get("go2_drive_segment")
             skills = SkillRegistry(
                 default_skills(stop_tool=stop_tool)
-                + go2_skills(settings, perception=perception, drive_tool=drive_tool)
+                + go2_skills(
+                    settings,
+                    perception=perception,
+                    drive_tool=drive_tool,
+                    passability=passability,
+                )
             )
         else:
             from robot_brain.skills.builtin.explore import ExploreSkill
@@ -149,7 +188,7 @@ class AgentRuntime:
             stop_tool = tool_registry.get("stop_motion")
             skills = SkillRegistry(
                 default_skills(stop_tool=stop_tool)
-                + [ExploreSkill(settings, perception=perception)]
+                + [ExploreSkill(settings, perception=perception, passability=passability)]
             )
         if llm is None:
             if settings.llm_backend == "mock":
@@ -217,7 +256,26 @@ class AgentRuntime:
             database=database,
             tasks=tasks,
             summaries=summaries,
+            passability_frame_source=passability_frame_source,
         )
+
+    def attach_passability_tap(self, conn: Any) -> bool:
+        """Register the Go2 WebRTC VLM frame tap on *conn* (call after connect).
+
+        Returns True if a tap was registered, False if VLM is off or the frame
+        source is not a Go2 video tap (e.g. file/null source).
+        """
+        fs = self.passability_frame_source
+        if fs is None:
+            return False
+        from robot_brain.vlm.frame_source import Go2VideoFrameSource
+
+        if not isinstance(fs, Go2VideoFrameSource):
+            return False
+        from robot_brain.vlm.go2_video_tap import prime_go2_video_for_passability
+
+        prime_go2_video_for_passability(conn, fs)
+        return True
 
     async def run_command(self, command: str, *, thread_id: str | None = None) -> RunResult:
         thread_id = thread_id or str(uuid4())

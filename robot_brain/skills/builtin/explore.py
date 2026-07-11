@@ -1,17 +1,23 @@
-"""Bounded Explore — composite skill combining scan/nudge/retreat in a loop.
+"""Bounded Explore - composite skill combining scan/nudge/retreat in a loop.
 
 Implements a rule-driven exploration cycle with hard stop conditions.
 Works on both mock and Go2 (unitree) backends. Does NOT call nested Skills;
 instead directly uses robot-level motion (MockRobot.move_to/turn or
-go2_motion.run_go2_drive_segments) — matching the architecture decision in
+go2_motion.run_go2_drive_segments) - matching the architecture decision in
 docs/plans/2026-06-24-160000-bounded-explore-mode.md §1.
+
+Iteration 17 adds an optional VLM **passability hint** as a soft direction
+suggestion (docs/plans/2026-06-24-170000-vlm-passability-hint.md). Ultrasonic
+proximity remains the hard safety gate; the VLM only chooses the alt-scan
+direction (left vs right) and can withhold a forward nudge ("stop"). When no
+analyzer is injected, behavior is identical to iteration 16.
 """
 from __future__ import annotations
 
 import logging
 import math
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
 
@@ -19,6 +25,10 @@ from config.settings import Settings
 from robot_brain.actuation.base import RobotInterface
 from robot_brain.core.world_state import WorldState
 from robot_brain.skills.base import Skill, SkillResult
+
+if TYPE_CHECKING:
+    from robot_brain.core.passability import PassabilityHint
+    from robot_brain.vlm.passability import PassabilityAnalyzer
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +49,7 @@ class ExploreParams(BaseModel):
 # ---------------------------------------------------------------------------
 
 class ExploreSkill(Skill):
-    """Bounded exploration: scan → decide → move, repeated up to max_steps."""
+    """Bounded exploration: scan -> decide -> move, repeated up to max_steps."""
 
     name = "explore"
     description = (
@@ -49,9 +59,16 @@ class ExploreSkill(Skill):
     )
     params_model = ExploreParams
 
-    def __init__(self, settings: Settings, *, perception: Any | None = None) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        *,
+        perception: Any | None = None,
+        passability: "PassabilityAnalyzer | None" = None,
+    ) -> None:
         self._settings = settings
         self._perception = perception  # Optional PerceptionAdapter for live polling
+        self._passability = passability  # Optional VLM passability analyzer
 
     async def execute(
         self,
@@ -105,6 +122,9 @@ class ExploreSkill(Skill):
             # --- Poll perception again (orientation changed) ---
             await self._poll_perception(world)
 
+            # --- VLM soft hint (one call per step, at the decision point) ---
+            hint = await self._maybe_analyze_passability(world)
+
             # --- Decide based on obstacles ---
             obstacle_front = self._is_obstacle_front(world)
 
@@ -114,11 +134,12 @@ class ExploreSkill(Skill):
                     stop_reason = "blocked"
                     actions.append("blocked")
                     break
-                # Try turning ±90° to find a clear path
-                turn_heading = world.heading_degrees + 90.0
+                # Turn to find a clear path: VLM soft hint -> ultrasonic -> +90
+                alt_angle, alt_tag = self._choose_alt_turn(world, hint)
+                turn_heading = world.heading_degrees + alt_angle
                 await robot.turn(turn_heading)
                 world.heading_degrees = turn_heading
-                actions.append("scan_alt")
+                actions.append(alt_tag)
                 await self._poll_perception(world)
 
                 # If still blocked after turning, retreat
@@ -134,8 +155,8 @@ class ExploreSkill(Skill):
                     await robot.move_to(new_pos, speed=0.15)
                     world.position = new_pos
                     actions.append("retreat")
-                else:
-                    # Clear after turning — nudge in new direction
+                elif self._should_nudge_forward(hint):
+                    # Clear after turning - nudge in new direction
                     step_m = params.step_distance_cm / 100.0
                     pos = world.position
                     rad = math.radians(world.heading_degrees)
@@ -147,7 +168,10 @@ class ExploreSkill(Skill):
                     await robot.move_to(new_pos, speed=0.15)
                     world.position = new_pos
                     actions.append("nudge")
-            else:
+                else:
+                    # Front clear after alt turn but VLM says stop - hold.
+                    actions.append("vlm_hold")
+            elif self._should_nudge_forward(hint):
                 # Nudge forward
                 step_m = params.step_distance_cm / 100.0
                 pos = world.position
@@ -160,6 +184,9 @@ class ExploreSkill(Skill):
                 await robot.move_to(new_pos, speed=0.15)
                 world.position = new_pos
                 actions.append("nudge")
+            else:
+                # Front clear but VLM says stop - hold position.
+                actions.append("vlm_hold")
 
             steps_done += 1
 
@@ -232,6 +259,9 @@ class ExploreSkill(Skill):
             # --- Poll perception again (orientation changed) ---
             await self._poll_perception(world)
 
+            # --- VLM soft hint (one call per step, at the decision point) ---
+            hint = await self._maybe_analyze_passability(world)
+
             # --- Decide based on obstacles ---
             obstacle_front = self._is_obstacle_front(world)
 
@@ -240,14 +270,16 @@ class ExploreSkill(Skill):
                     stop_reason = "blocked"
                     actions.append("blocked")
                     break
-                # Try turning 90° to find a clear path
-                alt_yaw_rad = math.radians(90.0)
+                # Turn to find a clear path: VLM soft hint -> ultrasonic -> +90
+                alt_angle, alt_tag = self._choose_alt_turn(world, hint)
+                alt_yaw_rad = math.radians(abs(alt_angle))
+                alt_vyaw = go2_motion.YAW_SPEED if alt_angle >= 0 else -go2_motion.YAW_SPEED
                 alt_durations = go2_motion.plan_yaw_segments(alt_yaw_rad, seg_dur)
                 alt_result = await go2_motion.run_go2_drive_segments(
-                    robot, vyaw=go2_motion.YAW_SPEED, durations=alt_durations,
+                    robot, vyaw=alt_vyaw, durations=alt_durations,
                 )
                 segments_total += alt_result["segment_count"]
-                actions.append("scan_alt")
+                actions.append(alt_tag)
 
                 if not alt_result["success"]:
                     stop_reason = "drive_error"
@@ -264,8 +296,8 @@ class ExploreSkill(Skill):
                     )
                     segments_total += result["segment_count"]
                     actions.append("retreat")
-                else:
-                    # Clear after turning — nudge in new direction
+                elif self._should_nudge_forward(hint):
+                    # Clear after turning - nudge in new direction
                     distance_m = params.step_distance_cm / 100.0
                     durations = go2_motion.plan_linear_segments(distance_m, seg_dur)
                     result = await go2_motion.run_go2_drive_segments(
@@ -273,7 +305,10 @@ class ExploreSkill(Skill):
                     )
                     segments_total += result["segment_count"]
                     actions.append("nudge")
-            else:
+                else:
+                    # Front clear after alt turn but VLM says stop - hold.
+                    actions.append("vlm_hold")
+            elif self._should_nudge_forward(hint):
                 # Nudge forward
                 distance_m = params.step_distance_cm / 100.0
                 durations = go2_motion.plan_linear_segments(distance_m, seg_dur)
@@ -282,6 +317,9 @@ class ExploreSkill(Skill):
                 )
                 segments_total += result["segment_count"]
                 actions.append("nudge")
+            else:
+                # Front clear but VLM says stop - hold position.
+                actions.append("vlm_hold")
 
             if not result["success"]:
                 stop_reason = "drive_error"
@@ -346,19 +384,19 @@ class ExploreSkill(Skill):
     def _is_obstacle_front(self, world: WorldState) -> bool:
         """Check if there's an obstacle in front within proximity threshold.
 
-        Returns True (blocked) when no proximity data is available — the
+        Returns True (blocked) when no proximity data is available - the
         conservative policy is to NOT move forward without sensor confirmation.
         """
         ss = world.robot_self_state
         if ss is None or ss.ultrasonic is None or ss.ultrasonic.front_m is None:
-            return True  # No data → conservative: do NOT forward nudge
+            return True  # No data -> conservative: do NOT forward nudge
         threshold = self._settings.obstacle_proximity_threshold
         return ss.ultrasonic.front_m < threshold
 
     def _is_all_blocked(self, world: WorldState) -> bool:
         """Check if obstacles are detected on all sides.
 
-        Returns False when data is unavailable — we only declare "all blocked"
+        Returns False when data is unavailable - we only declare "all blocked"
         when ALL four sensors actively report a close reading.
         """
         ss = world.robot_self_state
@@ -371,6 +409,55 @@ class ExploreSkill(Skill):
         left_blocked = u.left_m is not None and u.left_m < threshold
         right_blocked = u.right_m is not None and u.right_m < threshold
         return front_blocked and rear_blocked and left_blocked and right_blocked
+
+    async def _maybe_analyze_passability(self, world: WorldState) -> "PassabilityHint | None":
+        """Ask the VLM for a passability hint if an analyzer is wired.
+
+        Returns None when no analyzer is configured or the call fails/skipped;
+        the caller then falls back to rule-based direction choice.
+        """
+        if self._passability is None:
+            return None
+        try:
+            return await self._passability.analyze_if_due(world)
+        except Exception as exc:
+            logger.warning("explore: passability analyze failed: %s", exc)
+            return None
+
+    def _hint_usable(self, hint: "PassabilityHint | None") -> bool:
+        """A hint counts only if confident enough; otherwise fall back to rules."""
+        return hint is not None and hint.confidence >= self._settings.vlm_confidence_min
+
+    def _choose_alt_turn(
+        self, world: WorldState, hint: "PassabilityHint | None"
+    ) -> tuple[float, str]:
+        """Pick the alt-scan direction: VLM soft hint -> ultrasonic -> +90 default.
+
+        Returns ``(turn_angle_deg, action_tag)``. Positive angle = CCW = left
+        turn (matches ScanSkill's sign convention); negative = CW = right.
+        """
+        if self._hint_usable(hint):
+            direction = hint.recommended_direction  # type: ignore[union-attr]
+            if direction == "left":
+                return 90.0, "scan_alt_left"
+            if direction == "right":
+                return -90.0, "scan_alt_right"
+            # "forward"/"stop" carry no alt-direction preference -> fall through
+        ss = world.robot_self_state
+        if ss is not None and ss.ultrasonic is not None:
+            u = ss.ultrasonic
+            if u.left_m is not None and u.right_m is not None:
+                if u.left_m > u.right_m:
+                    return 90.0, "scan_alt_left"
+                if u.right_m > u.left_m:
+                    return -90.0, "scan_alt_right"
+        return 90.0, "scan_alt"
+
+    def _should_nudge_forward(self, hint: "PassabilityHint | None") -> bool:
+        """Front is clear; a usable VLM 'stop' withholds the forward nudge."""
+        if self._hint_usable(hint) and hint.recommended_direction == "stop":  # type: ignore[union-attr]
+            return False
+        return True
 
     async def _poll_perception(self, world: WorldState) -> None:
         """If a perception adapter is injected, poll for fresh observations."""

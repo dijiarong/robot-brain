@@ -2,11 +2,10 @@
 from __future__ import annotations
 
 import unittest
-from dataclasses import replace
 
 from config.settings import Settings
 from robot_brain.core.robot_self_state import RobotSelfState, UltrasonicData
-from robot_brain.core.state_interpreter import StateInterpreter, StateInterpretation
+from robot_brain.core.state_interpreter import StateInterpreter
 from robot_brain.core.world_state import WorldState
 
 
@@ -156,6 +155,42 @@ class TestWorldStateSummaryPublicAPI(unittest.TestCase):
         world = WorldState(battery_level=20.0)
         summary = world._build_state_summary()
         assert "LOW" in summary["battery"]
+
+
+class TestStateInterpreterPassability(unittest.TestCase):
+    """VLM passability hint surfaces in the summary and cognitive_snapshot."""
+
+    def setUp(self) -> None:
+        self.settings = Settings()
+        self.interpreter = StateInterpreter(self.settings)
+
+    def test_no_hint_omits_passability(self) -> None:
+        result = self.interpreter.interpret(WorldState(battery_level=80.0))
+        assert "passability" not in result.summary
+
+    def test_hint_appears_in_summary(self) -> None:
+        from robot_brain.core.passability import PassabilityHint
+
+        world = WorldState(
+            battery_level=80.0,
+            passability_hint=PassabilityHint(
+                recommended_direction="left", confidence=0.82, reason="left open"
+            ),
+        )
+        result = self.interpreter.interpret(world)
+        assert "left" in result.summary["passability"]
+        assert "0.82" in result.summary["passability"]
+        assert any("SOFT" in p for p in result.active_policies)
+
+    def test_hint_flows_into_cognitive_snapshot(self) -> None:
+        from robot_brain.core.passability import PassabilityHint
+
+        world = WorldState(
+            passability_hint=PassabilityHint(recommended_direction="stop", confidence=0.9),
+        )
+        snap = world.cognitive_snapshot(self.settings)
+        assert "left" not in snap["_state_summary"].get("passability", "")
+        assert "stop" in snap["_state_summary"]["passability"]
 
 
 if __name__ == "__main__":

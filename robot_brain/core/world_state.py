@@ -6,11 +6,11 @@ from typing import Any, Literal, TYPE_CHECKING
 
 from pydantic import BaseModel, Field
 
+from robot_brain.core.passability import PassabilityHint
 from robot_brain.core.robot_self_state import RobotSelfState
 
 if TYPE_CHECKING:
     from config.settings import Settings
-    from robot_brain.core.state_interpreter import StateInterpretation
     from robot_brain.perception.base import Observation
 
 
@@ -48,6 +48,8 @@ class WorldState(BaseModel):
     current_task: TaskProgress | None = None
     estop_active: bool = False
     robot_self_state: RobotSelfState | None = None
+    #: Soft VLM direction suggestion (read-only; ultrasonic is the hard gate).
+    passability_hint: PassabilityHint | None = None
 
     def apply_observation(self, observation: "Observation", *, object_ttl_seconds: float | None = None) -> None:
         if observation.position is not None:

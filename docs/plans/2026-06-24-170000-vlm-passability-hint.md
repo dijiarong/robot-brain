@@ -4,7 +4,7 @@
 
 - 创建时间：2026-06-24 17:00:00 CST
 - 文件序号：2026-06-24-170000
-- 状态：计划中
+- 状态：已完成（A+B+C 代码/测试完成，fake/dry-run 可验收；真机 VLM 联调与 Go2 抽帧待现场）
 - 负责人：dijiarong
 - 前置完成：[第十六次 Bounded Explore](./2026-06-24-160000-bounded-explore-mode.md) · [第十五次 兼容 LLM](./2026-06-24-150000-compatible-llm-backend.md) · [第十次 Perception Bridge](./2026-06-13-000000-unitree-perception-bridge.md)
 
@@ -36,24 +36,24 @@ MODEL  = "/Users/dijia/models/Qwen3-VL-8B-4bit"
 
 ### 阶段 A（必做 — VLM Hint + explore 换向）
 
-- [ ] `PassabilityHint` 模型 — 结构化可通行建议写入 `WorldState` / `Observation`
-- [ ] `VLMClient` — 调用本地 Qwen3-VL（OpenAI 兼容 multimodal API）
-- [ ] `PassabilityAnalyzer` — 抽帧 → 编码 → prompt → 解析 JSON → Hint
-- [ ] `explore` 集成 — 超声波 **硬否决** + VLM **软选向**（替代固定 +90°）
-- [ ] Settings / 环境变量 — base URL、model、超时、降采样、调用间隔
-- [ ] mock 路径 — 固定图片或 stub HTTP，**不依赖真机视频**
-- [ ] 单测 + fake explore 集成测
+- [x] `PassabilityHint` 模型 — 结构化可通行建议写入 `WorldState` / `Observation`
+- [x] `VLMClient` — 调用本地 Qwen3-VL（OpenAI 兼容 multimodal API）
+- [x] `PassabilityAnalyzer` — 抽帧 → 编码 → prompt → 解析 JSON → Hint
+- [x] `explore` 集成 — 超声波 **硬否决** + VLM **软选向**（替代固定 +90°）
+- [x] Settings / 环境变量 — base URL、model、超时、降采样、调用间隔
+- [x] mock 路径 — 固定图片或 stub HTTP，**不依赖真机视频**
+- [x] 单测 + fake explore 集成测
 
 ### 阶段 B（可选 — Go2 真机抽帧）
 
-- [ ] `FrameSource` 从 Go2 WebRTC video track 抓取 **单帧 JPEG**（探索时低频，如 0.5 Hz）
-- [ ] 与 `unitree_video_relay` 共存：抽帧走内存队列，不替代 RTP relay
+- [x] `FrameSource` 从 Go2 WebRTC video track 抓取 **单帧 JPEG**（探索时低频，如 0.5 Hz）
+- [x] 与 `unitree_video_relay` 共存：抽帧走内存队列，不替代 RTP relay
 - [ ] 真机 dry-run 验证 Hint 延迟与稳定性
 
 ### 阶段 C（可选 — 认知层文案）
 
-- [ ] `StateInterpreter` / `PromptBuilder` 增加 VLM hint 摘要（供 LLM 读，不直接 drive）
-- [ ] explore 停止时 `report` 可附带 VLM `reason`
+- [x] `StateInterpreter` / `PromptBuilder` 增加 VLM hint 摘要（供 LLM 读，不直接 drive）
+- [x] explore 停止时 `report` 可附带 VLM `reason`
 
 ## 非目标（本轮明确不做）
 
@@ -289,15 +289,18 @@ if hint:
 
 ### 自动化
 
-| # | 场景 | 期望 |
-|---|------|------|
-| 1 | mock HTTP 返回 `left` JSON | `PassabilityHint.recommended_direction==left` |
-| 2 | 非法 JSON / 超时 | fallback，explore 仍完成 |
-| 3 | confidence < min | 忽略 hint，走 +90° 规则 |
-| 4 | explore + stub hint `right` | `actions` 含 `-90°` 或 `scan_alt_right` 标记 |
-| 5 | VLM `stop` + front clear | 无 forward nudge |
-| 6 | front 超声波近 | 无论 VLM 说什么都不 forward |
-| 7 | `RDB_VLM_ENABLED=false` | 行为与第十六次完全一致（回归） |
+| # | 场景 | 期望 | 状态 |
+|---|------|------|------|
+| 1 | mock HTTP 返回 `left` JSON | `PassabilityHint.recommended_direction==left` | ✅ test_vlm_client |
+| 2 | 非法 JSON / 超时 | fallback，explore 仍完成 | ✅ test_passability_analyzer + 端到端冒烟 |
+| 3 | confidence < min | 忽略 hint，走 +90° 规则 | ✅ test_explore_vlm |
+| 4 | explore + stub hint `right` | `actions` 含 `scan_alt_right` 标记 | ✅ test_explore_vlm |
+| 5 | VLM `stop` + front clear | 无 forward nudge（`vlm_hold`） | ✅ test_explore_vlm |
+| 6 | front 超声波近 | 无论 VLM 说什么都不 forward | ✅ test_explore_vlm |
+| 7 | `RDB_VLM_ENABLED=false` | 行为与第十六次完全一致（回归） | ✅ test_explore_vlm + test_explore_skill |
+
+全量 `pytest tests/ -q`：462 passed, 4 skipped。新增测试：test_vlm_client(7) / test_passability_analyzer(4) / test_explore_vlm(7) / test_go2_frame_source(4) / test_state_interpreter +passability(3)。
+端到端冒烟：`RDB_VLM_ENABLED=true RDB_VLM_FRAME_PATH=...` 经 runtime 跑 explore，VLM 不可达时 `passability VLM call failed, falling back to rules`，explore 仍 `completed`（scan/nudge 规则路径）。
 
 ### 手动
 
@@ -365,7 +368,39 @@ python -m pytest tests/ -q
 
 （迭代完成后填写）
 
-- VLM 延迟与命中率  
-- explore stop_reason 分布变化  
-- 是否仍需轻量里程计 / `no_progress`  
-- 是否进入 SLAM 或 frontier（方向 D）
+### 落地内容
+
+- **阶段 A**：新增 `robot_brain/core/passability.py`（`PassabilityHint`）、`robot_brain/vlm/` 包（`encoding`/`client`/`frame_source`/`passability`/`go2_video_tap`）。`VLMClient` 走 OpenAI 兼容 multimodal `/v1/chat/completions`，`temperature=0` 强制 JSON，`_parse_hint` 容错 markdown fence/prose/列表 content 并校验枚举 + clamp confidence。`PassabilityAnalyzer.analyze_if_due` 做 min_interval 防抖、失败回退 None。
+- **explore 集成**：`ExploreSkill` 增 `passability` 注入；mock/go2 两 loop 在决策点调一次 `analyze_if_due`，`_choose_alt_turn` 按 VLM hint -> 超声波 left/right -> +90 默认选向（tag `scan_alt_left`/`scan_alt_right`/`scan_alt`），`_should_nudge_forward` 在 VLM `stop` 时改 `vlm_hold`。超声波硬门不变。
+- **阶段 B**：`Go2VideoFrameSource` 后台 drain `track.recv()` -> `av.VideoFrame.to_image()` -> JPEG，只缓存最新帧；`go2_video_tap.register_go2_frame_tap`/`prime_go2_video_for_passability` 镜像 relay API；`AgentRuntime.attach_passability_tap(conn)` 供服务在 connect 后注册。fake async track 单测覆盖。
+- **阶段 C**：`StateInterpreter` 增 `passability` 摘要 + policy 提示「VLM 仅供参考，超声波为硬约束」，经 `_state_summary` 自动进 `cognitive_snapshot` 与 PromptBuilder。
+
+### VLM 延迟与命中率
+
+- 未接真机，仅 fake/单元验证。analyzer 已具备三层兜底：min_interval 限频（默认 2s）、超时（默认 30s）回退、confidence 阈值（默认 0.5）忽略。
+- 端到端冒烟确认 VLM 不可达时 explore 仍 `completed`（规则路径），无阻塞。
+
+### explore stop_reason 分布变化
+
+- VLM 启用且建议 `stop` 时新增 `vlm_hold` action（原会 nudge forward）；其余分支 stop_reason 不变（max_steps/blocked/low_battery/estop/robot_error）。
+- `RDB_VLM_ENABLED=false`（默认）行为与第十六次完全一致，test_explore_skill 18 例全过。
+
+### 待现场 / 后续
+
+- **aiortc 单消费者**：`Go2VideoFrameSource` 与 RTP relay 不能同时 drain 同一 track（帧会被拆分）。真机若需「浏览器视频 + VLM」并存，需加 tee（单 drain 分发多订阅）。本轮不改 `go2_video_relay` 的 RTP 行为，仅在 docstring/README 注明取舍。
+- 真机 dry-run：验证 Hint 延迟（预期 1–3s）、命中率、与超声波矛盾的取舍（可选「矛盾则信 ultrasonic」）。
+- 是否仍需轻量里程计 / `no_progress` 停止（可与第十六次 review 一并做）。
+- 是否进入 SLAM 或 frontier（方向 D）——本轮明确不做。
+
+### 取舍记录
+
+- VLM 与文本 LLM 严格分客户端（`VLMClient` vs `CompatibleLLMClient`），避免整帧图进 Planner prompt。
+- Hint 不入 LLM tool list，不直接 drive；VLM 只输出方向建议，速度/距离仍由 skill 与 `SafetyValidator` 管。
+- `WorldState.passability_hint` 为单一挂载点（不放 Observation，因 VLM 非感知适配器）；摘要走 `StateInterpreter` 单一事实源。
+- 编码客户端侧缩放（`vlm_max_edge`），不发送 `resize_shape` 以兼容不支持该扩展字段的服务端。
+
+### Review 修复（P1–P3）
+
+- **P1（已修）依赖声明**：`pyproject.toml` 新增 `vlm = ["httpx>=0.27", "Pillow>=10.0"]` extra；`dev` 增 `httpx`/`Pillow`/`av`/`numpy`，确保 `pip install -e ".[dev]"` 可跑全部测试。`tests/test_go2_frame_source.py` 改用 `pytest.importorskip("av"/"numpy"/"PIL")`，minimal install 下优雅跳过而非收集报错。README VLM 小节注明 `pip install -e ".[vlm]"`。
+- **P2（已修）限流复用陈旧 hint**：原 `analyze_if_due` 在 `vlm_min_interval` 内复用 `_last_hint`，但 explore 每步 scan 后朝向已变，旧 hint 的 left/right/stop 是上一视角的判断，会让探索发散。改为限流时返回 `None`（走规则 fallback），不再复用；移除 `_last_hint` 缓存。
+- **P3（已修）失败不清空 hint**：原 VLM 失败/无帧返回 `None` 但不清 `world.passability_hint`，StateInterpreter 会继续展示旧 hint。改为失败/无帧时清空 `world.passability_hint`（成功时写新值）。`VLMClient` 同时填充 `frame_timestamp`（审计）。新增 `test_failure_clears_previous_hint` / `test_no_frame_clears_previous_hint` / `test_min_interval_skips_within_window` 覆盖。

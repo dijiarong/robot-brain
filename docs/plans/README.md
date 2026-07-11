@@ -23,7 +23,7 @@
 
 ## 进行中 / 计划中
 
-- [第十七次迭代：本地 VLM 可通行性 Hint](./2026-06-24-170000-vlm-passability-hint.md)：对接局域网 Qwen3-VL-8B（OpenAI 兼容 multimodal API），输出 `PassabilityHint` 供 `explore` 软选向；超声波仍硬否决；不自训模型、不做 SLAM。
+- [第十七次迭代：本地 VLM 可通行性 Hint](./2026-06-24-170000-vlm-passability-hint.md)：对接局域网 Qwen3-VL-8B（OpenAI 兼容 multimodal API），输出 `PassabilityHint` 供 `explore` 软选向；超声波仍硬否决；不自训模型、不做 SLAM；A+B+C 代码/测试完成，真机 VLM 联调待现场。
 - [能力底座 - Tool / Skill / Policy / Catalog 契约](./2026-07-10-170002-capability-foundation-tool-skill-contract.md)：四层能力分层（Tool 原子能力 / Skill 行为语义 / Policy 安全边界 / Catalog 规划器视图），迁移 stop + nudge 纵切，`SafetyPolicy` 按 metadata 判定；代码/测试完成，fake/dry-run 可验收。
 
 ## 后续方向池

@@ -183,6 +183,28 @@ class Settings:
         default_factory=lambda: int(os.getenv("RDB_GO2_REFLEX_ERROR_DEBOUNCE", "1"))
     )
 
+    # Local VLM passability hint (iteration 17). Default off - does not affect
+    # mock/CI. When enabled, ExploreSkill asks a LAN Qwen3-VL for a soft
+    # direction suggestion; ultrasonic remains the hard safety gate.
+    vlm_enabled: bool = field(default_factory=lambda: _env_bool("RDB_VLM_ENABLED", False))
+    vlm_base_url: str = field(
+        default_factory=lambda: os.getenv("RDB_VLM_BASE_URL", "http://10.10.197.175:8080")
+    )
+    vlm_model: str = field(
+        default_factory=lambda: os.getenv("RDB_VLM_MODEL", "/Users/dijia/models/Qwen3-VL-8B-4bit")
+    )
+    vlm_api_key: str = field(default_factory=lambda: os.getenv("RDB_VLM_API_KEY", "vlm"))
+    vlm_max_edge: int = field(default_factory=lambda: int(os.getenv("RDB_VLM_MAX_EDGE", "768")))
+    vlm_timeout: float = field(default_factory=lambda: float(os.getenv("RDB_VLM_TIMEOUT", "30")))
+    vlm_min_interval: float = field(
+        default_factory=lambda: float(os.getenv("RDB_VLM_MIN_INTERVAL", "2.0"))
+    )
+    vlm_confidence_min: float = field(
+        default_factory=lambda: float(os.getenv("RDB_VLM_CONFIDENCE_MIN", "0.5"))
+    )
+    # Optional still-image path for mock/file VLM smoke tests (no live camera).
+    vlm_frame_path: str = field(default_factory=lambda: os.getenv("RDB_VLM_FRAME_PATH", ""))
+
     # Teleop session (remote velocity control ingress).
     # Deadman: if no setpoint arrives within this window, drive auto-stops.
     teleop_deadman_ms: int = field(

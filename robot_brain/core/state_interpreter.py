@@ -143,6 +143,18 @@ class StateInterpreter:
         if critical:
             summary["alerts"] = f"CRITICAL ALERTS: {'; '.join(critical)}"
 
+        # --- VLM passability hint (soft suggestion; ultrasonic is the hard gate) ---
+        hint = world.passability_hint
+        if hint is not None:
+            summary["passability"] = (
+                f"{hint.recommended_direction} (conf={hint.confidence:.2f})"
+                + (f": {hint.reason}" if hint.reason else "")
+            )
+            policies.append(
+                "- VLM passability hint is a SOFT suggestion only; ultrasonic "
+                "proximity is the hard safety gate and may override it."
+            )
+
         # --- Default policy ---
         if not policies:
             policies.append(

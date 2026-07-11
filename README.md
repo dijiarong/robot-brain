@@ -199,6 +199,13 @@ $env:RDB_MEMORY_DB = "D:\robot-data\robot_brain.sqlite3"
 | `RDB_UNITREE_ROBOT_IP` | 空 | Go2 WebRTC LAN IP（亦读 `DIMOS_ROBOT_IP` / `ROBOT_IP`） |
 | `RDB_UNITREE_DRY_RUN` | `true` | `false` 才允许向真机下发（仍受 motion gate 约束） |
 | `RDB_UNITREE_ENABLE_MOTION` | `false` | 真实姿态/平移硬安全门；`stop` 在已连接时始终允许 |
+| `RDB_VLM_ENABLED` | `false` | 本地 VLM 可通行性 Hint 总开关（默认关，不影响 mock/CI） |
+| `RDB_VLM_BASE_URL` | `http://10.10.197.175:8080` | 局域网 Qwen3-VL 服务地址 |
+| `RDB_VLM_MODEL` | `/Users/dijia/models/Qwen3-VL-8B-4bit` | 服务端 model 字段 |
+| `RDB_VLM_CONFIDENCE_MIN` | `0.5` | 低于此置信度忽略 Hint，走规则 fallback |
+| `RDB_VLM_MIN_INTERVAL` | `2.0` | explore 内两次 VLM 调用最小间隔（秒） |
+| `RDB_VLM_TIMEOUT` | `30` | VLM 请求超时（秒）；超时回退规则 |
+| `RDB_VLM_FRAME_PATH` | 空 | mock/CI 静态图片路径（无真机相机时用） |
 
 更多 Unitree 变量（限速、watchdog、Move/摇杆策略等）见 [`docs/unitree-setup.md`](./docs/unitree-setup.md) 与 `config/settings.py`。
 
@@ -237,6 +244,24 @@ export RDB_OPENAI_MODEL=qwen2.5:7b
 | qwen2.5:7b+ | ✅ | Ollama 本地，支持 tool calling |
 | llama3.1:8b+ | ⚠️ | tool calling 不稳定，建议 ≥70B |
 | mistral-nemo | ⚠️ | 需实测 |
+
+### VLM 可通行性 Hint（第十七次迭代）
+
+`explore` 技能可接入本地 Qwen3-VL（OpenAI 兼容 multimodal）作为**只读语义传感器**，在换向时给出软方向建议。**超声波仍是硬安全门**，VLM 不能 override；失败/超时/低置信度自动回退第十六次规则（固定 +90° 或超声波 left/right）。默认关闭，不影响 mock/CI。
+
+> 安装依赖：`pip install -e ".[vlm]"`（`httpx` + `Pillow`）。Go2 真机抽帧还需 `unitree-webrtc` extra（带 `av`）；开发装 `.[dev]` 已含全部测试依赖。
+
+```bash
+export RDB_VLM_ENABLED=true
+export RDB_VLM_BASE_URL=http://10.10.197.175:8080
+export RDB_VLM_MODEL=/Users/dijia/models/Qwen3-VL-8B-4bit
+# 可选：mock/CI 用静态图片代替真机视频
+export RDB_VLM_FRAME_PATH=/tmp/front.jpg
+```
+
+- 连通性自测：`python -m examples.vlm_passability_smoke --image path/to/front.jpg`
+- 真机抽帧（unitree+webrtc）：`AgentRuntime.attach_passability_tap(conn)` 在 `await conn.connect()` 后注册 Go2 视频抽帧。注意 aiortc 单消费者：与 RTP relay 同 track 并存需 tee（后续工作）。
+- 设计原则：VLM 与文本 LLM 分客户端；Hint 不入 LLM tool list、不直接 drive；JSON 输出 + 本地校验 + 三层兜底（限频/超时/置信度）。详见 [迭代计划](./docs/plans/2026-06-24-170000-vlm-passability-hint.md)。
 
 项目测试基于 `pytest`（部分用例使用 `pytest-asyncio`）：
 
