@@ -69,8 +69,8 @@ async def run_action_sequence(robot: UnitreeRobot) -> None:
     print()
 
     if not robot.dry_run:
-        print(f"[WARNING] DRY-RUN IS OFF. Real actions will be sent to the robot.")
-        print(f"[WARNING] Ensure: open space, safe distance, operator has e-stop ready.")
+        print("[WARNING] DRY-RUN IS OFF. Real actions will be sent to the robot.")
+        print("[WARNING] Ensure: open space, safe distance, operator has e-stop ready.")
         print()
         confirmation = input(f"Type '{CONFIRMATION_PHRASE}' to proceed: ").strip()
         if confirmation != CONFIRMATION_PHRASE:
@@ -109,7 +109,6 @@ async def run_action_sequence(robot: UnitreeRobot) -> None:
     print("\n[Action History]")
     for i, entry in enumerate(robot.action_history, 1):
         action = entry.get("action", "?")
-        ts = entry.get("timestamp", "")
         display = {k: v for k, v in entry.items() if k not in ("action", "timestamp")}
         print(f"  {i}. {action} {display}")
 
@@ -132,8 +131,8 @@ async def run_posture_sequence(robot: UnitreeRobot) -> None:
     print("  7. Read state")
     print()
 
-    print(f"[WARNING] Real posture commands will be sent to the robot.")
-    print(f"[WARNING] Ensure: flat ground, clear space, operator can power off.")
+    print("[WARNING] Real posture commands will be sent to the robot.")
+    print("[WARNING] Ensure: flat ground, clear space, operator can power off.")
     print()
     confirmation = input(f"Type '{POSTURE_CONFIRMATION_PHRASE}' to proceed: ").strip()
     if confirmation != POSTURE_CONFIRMATION_PHRASE:
@@ -570,8 +569,8 @@ async def main() -> None:
         print(f"        RDB_UNITREE_ENABLE_MOTION=true ... --transport webrtc {flag} --live")
         sys.exit(1)
 
-    print(f"[Config]")
-    print(f"  Backend:       unitree")
+    print("[Config]")
+    print("  Backend:       unitree")
     print(f"  Transport:     {args.transport}")
     print(f"  Model:         {settings.unitree_model or '(not set)'}")
     if args.transport == "sdk":

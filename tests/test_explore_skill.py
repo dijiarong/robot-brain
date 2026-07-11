@@ -278,8 +278,7 @@ class TestExplorePerceptionPoll(unittest.IsolatedAsyncioTestCase):
 
     async def test_perception_poll_changes_decision(self) -> None:
         """Injected perception that adds obstacle mid-loop should change behavior."""
-        from unittest.mock import AsyncMock, MagicMock
-        from robot_brain.perception.base import Observation
+        from unittest.mock import MagicMock
 
         settings = Settings()
         skill = ExploreSkill(settings)

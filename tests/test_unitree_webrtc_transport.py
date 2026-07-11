@@ -12,7 +12,7 @@ import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from config.settings import Settings
-from robot_brain.actuation.unitree import UnitreeCommand, UnitreeRobot, UnitreeState
+from robot_brain.actuation.unitree import UnitreeCommand, UnitreeRobot
 from robot_brain.actuation.unitree_motion import MotionEndReason
 from robot_brain.actuation.unitree_webrtc import (
     _GO2_JOY_FULL_LINEAR,
@@ -331,10 +331,6 @@ class MotionLeaseTests(unittest.IsolatedAsyncioTestCase):
             UnitreeCommand(action="drive", parameters={"vx": -0.2, "duration": 0.0})
         )
         await first
-        non_zero_after_preempt = [
-            c for c in self.joy.call_args_list
-            if c.kwargs["data"]["ly"] > 0 and c is not self.joy.call_args_list[0]
-        ]
         # Second drive uses negative vx — should see negative ly, not positive from first.
         last_nonzero = next(
             (c for c in reversed(self.joy.call_args_list) if c.kwargs["data"] != _ZERO_STICK),

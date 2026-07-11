@@ -10,7 +10,6 @@ from unittest.mock import AsyncMock, MagicMock
 from config.settings import Settings
 from robot_brain.core.world_state import WorldState
 from robot_brain.llm.compatible_client import CompatibleLLMClient
-from robot_brain.llm.base import ToolCall
 from robot_brain.runtime.loop import AgentRuntime
 
 
@@ -229,7 +228,7 @@ class TestFallback(unittest.IsolatedAsyncioTestCase):
         client = CompatibleLLMClient(
             "test-model", client=mock_client, timeout_seconds=5.0, max_retries=1
         )
-        result = await client.plan("stop", WorldState(), [], [])
+        await client.plan("stop", WorldState(), [], [])
 
         self.assertTrue(client.is_degraded)
         # Should have been called twice (initial + 1 retry)

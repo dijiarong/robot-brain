@@ -131,7 +131,7 @@ class SchedulerTests(unittest.IsolatedAsyncioTestCase):
             llm=MockLLM([unsafe, unsafe]),
         )
         scheduler = AgentScheduler(runtime)
-        task = scheduler.submit("go far away", max_attempts=2)
+        scheduler.submit("go far away", max_attempts=2)
 
         first = await scheduler.run_next()
         second = await scheduler.run_next()

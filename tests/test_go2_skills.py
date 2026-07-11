@@ -1,22 +1,18 @@
 """Tests for Go2-native skills: nudge, scan, retreat and shared motion helpers."""
 from __future__ import annotations
 
-import asyncio
 import math
 import unittest
-from unittest.mock import patch
 
 from config.settings import Settings
-from robot_brain.actuation.base import RobotInterface, RobotState
 from robot_brain.actuation.unitree import (
     FakeUnitreeTransport,
     UnitreeRobot,
     UnitreeState,
 )
 from robot_brain.core.robot_self_state import RobotSelfState
-from robot_brain.core.world_state import Position, WorldState
+from robot_brain.core.world_state import WorldState
 from robot_brain.safety.validator import SafetyValidator
-from robot_brain.skills.base import SkillResult
 from robot_brain.skills.builtin.go2_catalog import (
     NudgeParams,
     NudgeSkill,
@@ -28,7 +24,6 @@ from robot_brain.skills.builtin.go2_catalog import (
 )
 from robot_brain.skills.builtin.go2_motion import (
     LINEAR_SPEED,
-    YAW_SPEED,
     _chop,
     check_robot_self_state,
     plan_linear_segments,

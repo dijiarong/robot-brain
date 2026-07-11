@@ -1,7 +1,6 @@
 """Persistent priority scheduler layered over the single-command runtime."""
 from __future__ import annotations
 
-from typing import Any
 from uuid import uuid4
 
 from pydantic import BaseModel

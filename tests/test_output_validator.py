@@ -6,13 +6,13 @@ import unittest
 from unittest.mock import AsyncMock, MagicMock
 
 from config.settings import Settings
-from robot_brain.core.errors import BrainError, ErrorCode
+from robot_brain.core.errors import ErrorCode
 from robot_brain.llm.base import ToolCall
 from robot_brain.llm.openai_client import OpenAIClient
 from robot_brain.llm.output_validator import LLMOutputValidator
 from robot_brain.core.world_state import WorldState
 from robot_brain.runtime.loop import AgentRuntime
-from robot_brain.safety.validator import SafetyValidator, ValidationResult
+from robot_brain.safety.validator import SafetyValidator
 from robot_brain.skills.builtin import default_skills
 from robot_brain.skills.registry import SkillRegistry
 

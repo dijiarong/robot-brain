@@ -13,7 +13,6 @@ import fractions
 import logging
 from typing import Any
 
-import av
 from aiortc import MediaStreamTrack, RTCPeerConnection
 
 logger = logging.getLogger(__name__)

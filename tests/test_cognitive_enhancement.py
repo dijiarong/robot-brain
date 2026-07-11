@@ -2,9 +2,7 @@
 from __future__ import annotations
 
 import pytest
-import pytest_asyncio
 
-from robot_brain.core.robot_self_state import RobotSelfState
 from robot_brain.core.world_state import WorldState
 from robot_brain.llm.base import ToolCall
 from robot_brain.llm.mock import MockLLM
@@ -139,7 +137,7 @@ class TestEnrichedExperience:
 
     @pytest.mark.asyncio
     async def test_experience_includes_skills_and_duration(self, runtime: AgentRuntime) -> None:
-        result = await runtime.run_command("navigate to 2 2")
+        await runtime.run_command("navigate to 2 2")
         # Check long-term memory has the enriched summary
         experiences = runtime.context.long_term.search("navigate to 2 2", limit=1)
         assert len(experiences) > 0

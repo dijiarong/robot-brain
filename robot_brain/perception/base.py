@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 
 from pydantic import BaseModel, Field
 
-from robot_brain.core.robot_self_state import ImuRPY, RobotSelfState, Velocity
+from robot_brain.core.robot_self_state import RobotSelfState
 from robot_brain.core.world_state import DetectedObject, Position
 
 

@@ -1,15 +1,12 @@
 """Tests for UnitreePerceptionAdapter and WorldState robot_self_state bridge."""
 from __future__ import annotations
 
-import asyncio
 import unittest
 
-from pydantic import BaseModel
 
 from config.settings import Settings
 from robot_brain.actuation.unitree import (
     FakeUnitreeTransport,
-    UnitreeCommand,
     UnitreeRobot,
     UnitreeState,
 )

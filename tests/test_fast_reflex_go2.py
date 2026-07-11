@@ -7,7 +7,6 @@ from config.settings import Settings
 from robot_brain.cognition.dual_system import DualSystem
 from robot_brain.cognition.fast_reflex import FastReflex
 from robot_brain.cognition.go2_reflex_rules import decide_go2_reflex
-from robot_brain.cognition.planner import Planner
 from robot_brain.core.robot_self_state import RobotSelfState
 from robot_brain.core.world_state import TaskProgress, WorldState
 from robot_brain.llm.base import ToolCall

@@ -25,12 +25,6 @@ class CombineNudgeKeysTests(unittest.TestCase):
         self.assertAlmostEqual(vx, 0.2)
         self.assertAlmostEqual(vy, 0.0)
         self.assertAlmostEqual(vyaw, -0.3)
-
-    def test_car_forward_and_turn(self) -> None:
-        vx, vy, vyaw = combine_nudge_keys({"w", "d"}, _CAR_NUDGES)
-        self.assertAlmostEqual(vx, 0.2)
-        self.assertAlmostEqual(vy, 0.0)
-        self.assertAlmostEqual(vyaw, -0.3)
         self.assertEqual(
             drive_channel_label(vx, vy, vyaw, omni=False),
             "joystick (arc)",

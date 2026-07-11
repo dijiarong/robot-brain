@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import unittest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 from config.settings import Settings
 from robot_brain.core.world_state import WorldState
@@ -55,7 +55,7 @@ class OpenAIClientFallbackTests(unittest.IsolatedAsyncioTestCase):
         world = WorldState()
         tools = []
 
-        result = await client.plan("stop", world, tools, [])
+        await client.plan("stop", world, tools, [])
 
         self.assertTrue(client.is_degraded)
         # Should have been called 2 times (original + 1 retry)
@@ -165,7 +165,7 @@ class EvaluationScenariosTests(unittest.IsolatedAsyncioTestCase):
         from robot_brain.evaluation import EvaluationHarness, SCENARIOS
 
         harness = EvaluationHarness()
-        results = await harness.run_all(SCENARIOS)
+        await harness.run_all(SCENARIOS)
         summary = harness.summary()
         self.assertEqual(0, summary["failed"], f"Failed scenarios: {summary['scenarios']}")
         self.assertGreaterEqual(summary["total"], 3)
