@@ -203,6 +203,19 @@ class SafetyValidator:
             deg = params.get("scan_degrees", 45.0)
             if not (10.0 <= deg <= 90.0):
                 return "explore scan_degrees must be 10–90°"
+        if skill_name == "go2_local_nav":
+            forward = params.get("forward_m", 0.0)
+            left = params.get("left_m", 0.0)
+            yaw = params.get("yaw_degrees", 0.0)
+            max_duration = params.get("max_duration_s", 12.0)
+            if not (-1.0 <= forward <= 1.0):
+                return "go2_local_nav forward_m must be -1.0–1.0 m"
+            if not (-0.5 <= left <= 0.5):
+                return "go2_local_nav left_m must be -0.5–0.5 m"
+            if not (-90.0 <= yaw <= 90.0):
+                return "go2_local_nav yaw_degrees must be ±90°"
+            if not (0.5 <= max_duration <= 20.0):
+                return "go2_local_nav max_duration_s must be 0.5–20.0"
         return ""
 
     def _validate_backend(self, skill_name: str) -> str:

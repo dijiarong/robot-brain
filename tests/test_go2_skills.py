@@ -14,6 +14,8 @@ from robot_brain.core.robot_self_state import RobotSelfState
 from robot_brain.core.world_state import WorldState
 from robot_brain.safety.validator import SafetyValidator
 from robot_brain.skills.builtin.go2_catalog import (
+    Go2LocalNavParams,
+    Go2LocalNavSkill,
     NudgeParams,
     NudgeSkill,
     RetreatParams,
@@ -355,6 +357,64 @@ class RetreatSkillTests(unittest.IsolatedAsyncioTestCase):
 
 
 # ---------------------------------------------------------------------------
+# Go2LocalNavSkill
+# ---------------------------------------------------------------------------
+
+class Go2LocalNavSkillTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self.settings = _settings(unitree_dry_run=False)
+
+    async def test_local_nav_forward_records_odom_delta(self):
+        from robot_brain.perception.unitree import UnitreePerceptionAdapter
+
+        robot = await _new_robot(ultrasonic=(1.0, 1.0, 1.0, 1.0))
+        robot._settings = self.settings
+        skill = Go2LocalNavSkill(self.settings, perception=UnitreePerceptionAdapter(robot))
+        world = _standing_world()
+        result = await skill.execute(
+            Go2LocalNavParams(forward_m=0.2, left_m=0.0, yaw_degrees=0.0),
+            robot,
+            world,
+        )
+        self.assertTrue(result.success, result.message)
+        self.assertEqual("go2_local_nav", result.data["skill"])
+        self.assertGreater(result.data["segment_count"], 0)
+        self.assertIsNotNone(result.data["motion_delta"])
+        self.assertGreaterEqual(result.data["motion_delta"]["delta_m"], 0.19)
+
+    async def test_local_nav_blocks_front_obstacle(self):
+        from robot_brain.core.robot_self_state import UltrasonicData
+
+        robot = await _new_robot()
+        robot._settings = self.settings
+        skill = Go2LocalNavSkill(self.settings)
+        world = _standing_world()
+        world.robot_self_state.ultrasonic = UltrasonicData(front_m=0.1)  # type: ignore[union-attr]
+        result = await skill.execute(
+            Go2LocalNavParams(forward_m=0.2),
+            robot,
+            world,
+        )
+        self.assertFalse(result.success)
+        self.assertEqual("front_obstacle", result.data["reason"])
+
+    async def test_local_nav_lateral_allowed_with_front_obstacle(self):
+        from robot_brain.core.robot_self_state import UltrasonicData
+
+        robot = await _new_robot()
+        robot._settings = self.settings
+        skill = Go2LocalNavSkill(self.settings)
+        world = _standing_world()
+        world.robot_self_state.ultrasonic = UltrasonicData(front_m=0.1)  # type: ignore[union-attr]
+        result = await skill.execute(
+            Go2LocalNavParams(forward_m=0.0, left_m=0.1),
+            robot,
+            world,
+        )
+        self.assertTrue(result.success, result.message)
+
+
+# ---------------------------------------------------------------------------
 # SafetyValidator
 # ---------------------------------------------------------------------------
 
@@ -436,6 +496,23 @@ class SafetyValidatorGo2Tests(unittest.TestCase):
         )
         self.assertTrue(result.allowed)
 
+    def test_local_nav_requires_confirmation(self):
+        result = self.validator.validate(
+            self.ToolCall(skill_name="go2_local_nav", parameters={"forward_m": 0.2}),
+            self.world,
+            confirmation_granted=False,
+        )
+        self.assertFalse(result.allowed)
+        self.assertTrue(result.requires_confirmation)
+
+    def test_local_nav_allowed_with_confirmation(self):
+        result = self.validator.validate(
+            self.ToolCall(skill_name="go2_local_nav", parameters={"forward_m": 0.2}),
+            self.world,
+            confirmation_granted=True,
+        )
+        self.assertTrue(result.allowed, result.reason)
+
 
 # ---------------------------------------------------------------------------
 # LLM tool schema
@@ -459,6 +536,13 @@ class ToolSchemaTests(unittest.TestCase):
         schema = skill.params_schema()
         self.assertIn("distance_cm", schema["properties"])
 
+    def test_local_nav_schema_includes_relative_target(self):
+        skill = Go2LocalNavSkill(_settings())
+        props = skill.params_schema()["properties"]
+        self.assertIn("forward_m", props)
+        self.assertIn("left_m", props)
+        self.assertIn("yaw_degrees", props)
+
 
 # ---------------------------------------------------------------------------
 # AgentRuntime integration
@@ -473,6 +557,7 @@ class RuntimeGo2SkillsTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(rt.context.skills.get("nudge"))
         self.assertIsNotNone(rt.context.skills.get("scan"))
         self.assertIsNotNone(rt.context.skills.get("retreat"))
+        self.assertIsNotNone(rt.context.skills.get("go2_local_nav"))
 
     async def test_mock_backend_does_not_register_go2_skills(self):
         from robot_brain.runtime.loop import AgentRuntime
@@ -482,6 +567,7 @@ class RuntimeGo2SkillsTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(rt.context.skills.get("nudge"))
         self.assertIsNone(rt.context.skills.get("scan"))
         self.assertIsNone(rt.context.skills.get("retreat"))
+        self.assertIsNone(rt.context.skills.get("go2_local_nav"))
 
     async def test_go2_skills_via_runtime_execute(self):
         """Execute nudge through the runtime's skill execution path."""
@@ -560,9 +646,9 @@ class GenericSkillsOnGo2Tests(unittest.IsolatedAsyncioTestCase):
 class Go2SkillsFactoryTests(unittest.TestCase):
     def test_factory_returns_skills(self):
         skills = go2_skills(_settings())
-        self.assertEqual(4, len(skills))
+        self.assertEqual(5, len(skills))
         names = {s.name for s in skills}
-        self.assertEqual({"nudge", "scan", "retreat", "explore"}, names)
+        self.assertEqual({"nudge", "scan", "retreat", "explore", "go2_local_nav"}, names)
 
 
 if __name__ == "__main__":

@@ -4,7 +4,7 @@
 
 - 创建时间：2026-07-16 00:30 CST
 - 文件序号：2026-07-16-003000
-- 状态：待开发
+- 状态：阶段 A 初版完成（pose/odom + go2_local_nav fake 可验收）
 - 负责人：dijia
 - 真机依赖：阶段 A 不依赖真机；阶段 B 需要 Go2 WebRTC / SDK 现场验证
 - 前置完成：[第十八次 Explore 现场可验收闭环](./2026-07-11-204545-explore-field-verification-loop.md)
@@ -97,30 +97,30 @@ robot-brain 的 `scan` / `explore` Go2 路径可以借这个思想：如果 odom
 
 ### 阶段 A：不依赖真机，必须完成
 
-- [ ] 定义轻量导航感知模型：
+- [x] 定义轻量导航感知模型：
   - `RobotPose`
   - `OdometryData`
   - `LocalMotionDelta`
   - `LocalGoal`
-- [ ] 扩展 `RobotSelfState` 或 `WorldState`，可记录：
+- [x] 扩展 `RobotSelfState` 或 `WorldState`，可记录：
   - 当前 pose
   - 线速度 / 角速度
   - pose timestamp / age
   - 最近一次运动 delta
 - [ ] 增加 odom 映射 helper，支持从 dict / fake transport 数据映射到内部 pose
-- [ ] `UnitreePerceptionAdapter` 将 odom 写入 world
-- [ ] `explore` trace 增加：
+- [x] `UnitreePerceptionAdapter` 将 odom 写入 world
+- [x] `explore` trace 增加：
   - `pose_before`
   - `pose_after`
   - `delta_m`
   - `delta_yaw_deg`
   - `progress_source`: `odom` / `behavior`
-- [ ] `no_progress` 优先用 odom delta 判定；无 odom 时回退第十八次行为判定
-- [ ] 新增 fake odom 测试，不接真机即可验证：
+- [x] `no_progress` 优先用 odom delta 判定；无 odom 时回退第十八次行为判定
+- [x] 新增 fake odom 测试，不接真机即可验证：
   - nudge 后 delta_m 增加
   - scan 后 delta_yaw_deg 增加
   - 发了 move 但 odom 不动时触发 `no_progress`
-- [ ] 保持 Go2 下 `navigate` / `patrol` 仍不暴露给 LLM
+- [x] 保持 Go2 下 `navigate` / `patrol` 仍不暴露给 LLM
 
 ### 阶段 B：需要真机，现场验证
 
@@ -204,7 +204,7 @@ valid
 
 ### 3. 局部导航技能
 
-本轮可以先不做完整技能，只打底。若要新增，建议命名为：
+本轮已新增轻量相对局部导航技能：
 
 ```text
 go2_local_nav
@@ -226,6 +226,13 @@ max_duration_s
 - 不接受地图坐标，只接受相对短距目标
 - 每次只执行一个短目标
 - 执行过程中如果 odom stale、超声波近障、VLM stop、急停、低电量，立即停止
+
+当前实现范围：
+
+- 已支持相对 `forward_m` / `left_m` / `yaw_degrees`，输出 move/yaw segments 和 odom delta
+- 已在 Unitree tool 白名单中注册，但保持全局 `navigate` / `patrol` 隐藏
+- 已加入确认要求和参数范围校验
+- 已覆盖 fake odom 测试；真机 odom/stale/VLM stop 联动仍放阶段 B
 
 ## 影响模块
 
