@@ -3,11 +3,16 @@
 A :class:`FrameSource` produces a single JPEG frame on demand. Phase A ships
 file-based sources (CI / manual smoke); Phase B adds :class:`Go2VideoFrameSource`
 which taps the Unitree WebRTC video track.
+
+All sources expose :attr:`kind` (for status/diagnostics) and a synchronous
+:meth:`stop` (idempotent; cancels background work). :attr:`last_frame_monotonic`
+records when the most recent frame was captured so callers can report frame age.
 """
 from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from abc import ABC, abstractmethod
 from io import BytesIO
 from pathlib import Path
@@ -19,12 +24,29 @@ logger = logging.getLogger(__name__)
 class FrameSource(ABC):
     """Produces a JPEG frame for VLM analysis, or ``None`` if unavailable."""
 
+    #: Short identifier for status/diagnostics (e.g. "file", "go2_tap", "null").
+    kind: str = "unknown"
+    #: ``time.monotonic()`` of the most recent captured frame, or ``None``.
+    last_frame_monotonic: float | None = None
+
     @abstractmethod
     async def get_frame(self) -> bytes | None: ...
+
+    def stop(self) -> None:
+        """Synchronously release background resources. Idempotent, no-op by default."""
+
+    @property
+    def frame_age_ms(self) -> float | None:
+        """Milliseconds since the last captured frame, or ``None`` if never."""
+        if self.last_frame_monotonic is None:
+            return None
+        return (time.monotonic() - self.last_frame_monotonic) * 1000.0
 
 
 class NullFrameSource(FrameSource):
     """Always returns ``None`` - graceful fallback when no camera is wired."""
+
+    kind = "null"
 
     async def get_frame(self) -> bytes | None:
         return None
@@ -36,14 +58,18 @@ class FileFrameSource(FrameSource):
     Useful for CI fixtures and manual VLM smoke tests against a still image.
     """
 
+    kind = "file"
+
     def __init__(self, path: str | Path) -> None:
         self._path = Path(path)
 
     async def get_frame(self) -> bytes | None:
         try:
-            return self._path.read_bytes()
+            data = self._path.read_bytes()
         except OSError:
             return None
+        self.last_frame_monotonic = time.monotonic()
+        return data
 
 
 #: Alias for clarity in test/CI wiring.
@@ -64,6 +90,8 @@ class Go2VideoFrameSource(FrameSource):
     accept that frames are split between consumers.
     """
 
+    kind = "go2_tap"
+
     def __init__(self) -> None:
         self._lock = asyncio.Lock()
         self._latest_jpeg: bytes | None = None
@@ -83,6 +111,7 @@ class Go2VideoFrameSource(FrameSource):
                 if jpeg is not None:
                     async with self._lock:
                         self._latest_jpeg = jpeg
+                        self.last_frame_monotonic = time.monotonic()
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001 - track ended / decode error
@@ -106,4 +135,3 @@ class Go2VideoFrameSource(FrameSource):
     def stop(self) -> None:
         if self._task is not None and not self._task.done():
             self._task.cancel()
-

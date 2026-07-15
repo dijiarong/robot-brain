@@ -263,6 +263,15 @@ export RDB_VLM_FRAME_PATH=/tmp/front.jpg
 - 真机抽帧（unitree+webrtc）：`AgentRuntime.attach_passability_tap(conn)` 在 `await conn.connect()` 后注册 Go2 视频抽帧。注意 aiortc 单消费者：与 RTP relay 同 track 并存需 tee（后续工作）。
 - 设计原则：VLM 与文本 LLM 分客户端；Hint 不入 LLM tool list、不直接 drive；JSON 输出 + 本地校验 + 三层兜底（限频/超时/置信度）。详见 [迭代计划](./docs/plans/2026-06-24-170000-vlm-passability-hint.md)。
 
+**第十八次迭代（explore 可验收闭环）：** explore 每步输出结构化 `trace`（传感器/VLM 建议/决策原因），新增 `no_progress`/`semantic_hold`/`ping_pong` 停止保护（`RDB_EXPLORE_NO_PROGRESS_STEPS=3` / `RDB_EXPLORE_PING_PONG_STEPS=4` / `RDB_EXPLORE_MAX_HOLDS=2`）；VLM 生命周期收口（`AgentRuntime.aclose()`）；`/api/status` 暴露 `vlm`/`explore` 诊断；frame source 可配（`RDB_VLM_FRAME_SOURCE=auto` / `RDB_VLM_VIDEO_PRIORITY=vlm`）。现场验收：
+
+```bash
+python -m examples.run_explore_acceptance --mode mock --output-json acceptance-mock.json
+python -m examples.run_explore_acceptance --mode unitree-fake --output-json acceptance-fake.json
+# 测停止保护（no_progress）：--scenario blocked 触发，result=aborted，退出码 1
+python -m examples.run_explore_acceptance --scenario blocked --output-json acceptance-protection.json
+```
+
 项目测试基于 `pytest`（部分用例使用 `pytest-asyncio`）：
 
 ```bash

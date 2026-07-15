@@ -24,6 +24,8 @@
 ## 进行中 / 计划中
 
 - [第十七次迭代：本地 VLM 可通行性 Hint](./2026-06-24-170000-vlm-passability-hint.md)：对接局域网 Qwen3-VL-8B（OpenAI 兼容 multimodal API），输出 `PassabilityHint` 供 `explore` 软选向；超声波仍硬否决；不自训模型、不做 SLAM；A+B+C 代码/测试完成，真机 VLM 联调待现场。
+- [第十八次迭代：Explore 现场可验收闭环](./2026-07-11-204545-explore-field-verification-loop.md)：explore 结构化 step trace + no_progress/semantic_hold/ping_pong 停止保护 + VLM 生命周期收口（aclose）+ /api.status vlm/explore 诊断 + acceptance JSON 脚本；阶段 A 代码/测试完成，真机联调待现场。
+- [第十九次迭代：借鉴 DimOS 的 Go2 局部导航底座](./2026-07-16-003000-dimos-inspired-local-navigation.md)：参考 DimOS 的 odom/LiDAR/video/cmd_vel 链路，先做 robot-brain 轻量 pose/odom 模型、explore trace 位移闭环和 odom 优先 no_progress；不移植完整 SLAM/A*/frontier 栈。
 - [能力底座 - Tool / Skill / Policy / Catalog 契约](./2026-07-10-170002-capability-foundation-tool-skill-contract.md)：四层能力分层（Tool 原子能力 / Skill 行为语义 / Policy 安全边界 / Catalog 规划器视图），迁移 stop + nudge 纵切，`SafetyPolicy` 按 metadata 判定；代码/测试完成，fake/dry-run 可验收。
 
 ## 后续方向池

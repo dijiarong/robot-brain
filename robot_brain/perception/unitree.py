@@ -5,7 +5,14 @@ import logging
 import math
 
 from robot_brain.actuation.unitree import UnitreeRobot, UnitreeState
-from robot_brain.core.robot_self_state import ImuRPY, RobotSelfState, UltrasonicData, Velocity
+from robot_brain.core.robot_self_state import (
+    ImuRPY,
+    OdometryData,
+    RobotPose,
+    RobotSelfState,
+    UltrasonicData,
+    Velocity,
+)
 from robot_brain.perception.base import Observation, PerceptionAdapter
 
 logger = logging.getLogger(__name__)
@@ -36,6 +43,17 @@ def _build_self_state(raw: UnitreeState, age: float) -> RobotSelfState:
             roll_deg=math.degrees(raw.imu_rpy[0]),
             pitch_deg=math.degrees(raw.imu_rpy[1]) if len(raw.imu_rpy) >= 2 else 0.0,
             yaw_deg=math.degrees(raw.imu_rpy[2]) if len(raw.imu_rpy) >= 3 else 0.0,
+        ),
+        odometry=OdometryData(
+            pose=RobotPose(
+                x_m=raw.position.x,
+                y_m=raw.position.y,
+                yaw_deg=raw.heading_degrees,
+            ),
+            vx_mps=raw.velocity[0],
+            vy_mps=raw.velocity[1] if len(raw.velocity) >= 2 else 0.0,
+            yaw_rate_dps=math.degrees(raw.velocity[2]) if len(raw.velocity) >= 3 else 0.0,
+            source="unitree_go2",
         ),
         state_age_seconds=age,
         ultrasonic=ultrasonic,

@@ -43,14 +43,14 @@ class AgentService:
         runner = self._runner
         if runner is None:
             if self.close_runtime_on_stop:
-                self.scheduler.runtime.close()
+                await self.scheduler.runtime.aclose()
             return
         self._stop_requested.set()
         await runner
         self._runner = None
         await self.publish("service_stopped")
         if self.close_runtime_on_stop:
-            self.scheduler.runtime.close()
+            await self.scheduler.runtime.aclose()
 
     async def dispatch_once(self) -> SchedulerResult:
         async with self._scheduler_lock:
@@ -113,6 +113,7 @@ class AgentService:
 
     def status(self) -> dict[str, Any]:
         runtime = self.scheduler.runtime
+        diagnostics = runtime.diagnostics()
         return {
             "service": {
                 "running": self.running,
@@ -122,6 +123,8 @@ class AgentService:
             "world": runtime.context.world.snapshot(),
             "tasks": [task.model_dump(mode="json") for task in self.scheduler.list_tasks()],
             "last_result": self._last_result.model_dump(mode="json") if self._last_result is not None else None,
+            "vlm": diagnostics.get("vlm", {}),
+            "explore": diagnostics.get("explore", {}),
         }
 
     @asynccontextmanager

@@ -79,6 +79,11 @@ class BuildSelfStateTests(unittest.TestCase):
         self.assertAlmostEqual(0.0, ss.imu_rpy.roll_deg)  # type: ignore[union-attr]
         self.assertAlmostEqual(0.0, ss.imu_rpy.pitch_deg)  # type: ignore[union-attr]
         self.assertAlmostEqual(89.954, ss.imu_rpy.yaw_deg, places=2)  # type: ignore[union-attr]
+        self.assertIsNotNone(ss.odometry)
+        self.assertIsNotNone(ss.odometry.pose)  # type: ignore[union-attr]
+        self.assertAlmostEqual(0.0, ss.odometry.pose.x_m)  # type: ignore[union-attr]
+        self.assertAlmostEqual(0.0, ss.odometry.pose.y_m)  # type: ignore[union-attr]
+        self.assertAlmostEqual(0.0, ss.odometry.pose.yaw_deg)  # type: ignore[union-attr]
         self.assertEqual(0.05, ss.state_age_seconds)
 
     def test_default_state_does_not_crash(self) -> None:
@@ -110,6 +115,17 @@ class UnitreePerceptionAdapterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(2.0, obs.position.y)  # type: ignore[union-attr]
         self.assertEqual(45.0, obs.heading_degrees)
         self.assertEqual(85.0, obs.battery_level)
+
+    async def test_observe_carries_odometry_pose(self) -> None:
+        obs = await self.adapter.observe()
+        self.assertIsNotNone(obs.self_state)
+        odom = obs.self_state.odometry  # type: ignore[union-attr]
+        self.assertIsNotNone(odom)
+        self.assertIsNotNone(odom.pose)  # type: ignore[union-attr]
+        self.assertEqual("unitree_go2", odom.source)  # type: ignore[union-attr]
+        self.assertAlmostEqual(1.0, odom.pose.x_m)  # type: ignore[union-attr]
+        self.assertAlmostEqual(2.0, odom.pose.y_m)  # type: ignore[union-attr]
+        self.assertAlmostEqual(45.0, odom.pose.yaw_deg)  # type: ignore[union-attr]
 
     async def test_error_code_passed_through(self) -> None:
         self.robot.transport._state.error_code = 7004

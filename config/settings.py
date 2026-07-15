@@ -177,6 +177,29 @@ class Settings:
     explore_scan_deg: float = field(
         default_factory=lambda: float(os.getenv("RDB_EXPLORE_SCAN_DEG", "45"))
     )
+    # Iteration 18: explore stop protection (no SLAM; behavior-trace based).
+    # Consecutive steps without a successful forward nudge -> no_progress stop.
+    explore_no_progress_steps: int = field(
+        default_factory=lambda: int(os.getenv("RDB_EXPLORE_NO_PROGRESS_STEPS", "3"))
+    )
+    # Alternating scan_alt_left/right count that triggers a ping-pong stop.
+    explore_ping_pong_steps: int = field(
+        default_factory=lambda: int(os.getenv("RDB_EXPLORE_PING_PONG_STEPS", "4"))
+    )
+    # Consecutive vlm_hold (VLM 'stop') steps that trigger a semantic_hold stop.
+    explore_max_holds: int = field(
+        default_factory=lambda: int(os.getenv("RDB_EXPLORE_MAX_HOLDS", "2"))
+    )
+    # Iteration 19: odometry-backed local progress thresholds.
+    odom_progress_min_m: float = field(
+        default_factory=lambda: float(os.getenv("RDB_ODOM_PROGRESS_MIN_M", "0.03"))
+    )
+    odom_progress_min_yaw_deg: float = field(
+        default_factory=lambda: float(os.getenv("RDB_ODOM_PROGRESS_MIN_YAW_DEG", "3.0"))
+    )
+    odom_max_age_seconds: float = field(
+        default_factory=lambda: float(os.getenv("RDB_ODOM_MAX_AGE_SECONDS", "1.0"))
+    )
 
     # Go2 FastReflex — consecutive non-zero error_code reads before triggering stop.
     go2_reflex_error_debounce: int = field(
@@ -204,6 +227,18 @@ class Settings:
     )
     # Optional still-image path for mock/file VLM smoke tests (no live camera).
     vlm_frame_path: str = field(default_factory=lambda: os.getenv("RDB_VLM_FRAME_PATH", ""))
+    # Iteration 18: explicit frame-source selection and video-consumer priority.
+    # vlm_frame_source: auto (frame_path -> go2_tap on unitree+webrtc -> null) |
+    # file | go2_tap | none.
+    vlm_frame_source: str = field(
+        default_factory=lambda: os.getenv("RDB_VLM_FRAME_SOURCE", "auto")
+    )
+    # When both the RTP relay and the VLM tap could read the same Go2 video
+    # track, which consumer wins. vlm = VLM tap (relay may starve);
+    # relay = keep RTP relay (no VLM tap); manual = caller wires the tap.
+    vlm_video_priority: str = field(
+        default_factory=lambda: os.getenv("RDB_VLM_VIDEO_PRIORITY", "vlm")
+    )
 
     # Teleop session (remote velocity control ingress).
     # Deadman: if no setpoint arrives within this window, drive auto-stops.

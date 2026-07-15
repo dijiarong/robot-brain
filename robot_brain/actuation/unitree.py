@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import time
 from abc import ABC, abstractmethod
 from collections.abc import Callable
@@ -120,8 +121,20 @@ class FakeUnitreeTransport(UnitreeTransport):
         elif command.action == "turn":
             self._state.heading_degrees = command.parameters.get("heading_degrees", 0)
         elif command.action == "drive":
-            # Velocity teleop is open-loop; the fake just reflects that the
-            # robot was briefly moving and ends stopped (auto-stop).
+            vx = float(command.parameters.get("vx", 0.0))
+            vy = float(command.parameters.get("vy", 0.0))
+            vyaw = float(command.parameters.get("vyaw", 0.0))
+            duration = float(command.parameters.get("duration", 0.0))
+            heading_rad = math.radians(self._state.heading_degrees)
+            dx_body = vx * duration
+            dy_body = vy * duration
+            dx_world = dx_body * math.cos(heading_rad) - dy_body * math.sin(heading_rad)
+            dy_world = dx_body * math.sin(heading_rad) + dy_body * math.cos(heading_rad)
+            self._state.position = Position(
+                x=self._state.position.x + dx_world,
+                y=self._state.position.y + dy_world,
+            )
+            self._state.heading_degrees += math.degrees(vyaw * duration)
             self._state.is_moving = False
             self._state.velocity = (0.0, 0.0, 0.0)
 

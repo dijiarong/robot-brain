@@ -42,14 +42,14 @@ class AgentServiceTests(unittest.IsolatedAsyncioTestCase):
         runtime = AgentRuntime.create(settings=Settings(memory_db_path=":memory:"))
         service = AgentService(AgentScheduler(runtime), poll_interval=0.01)
         closed = False
-        original_close = runtime.close
+        original_aclose = runtime.aclose
 
-        def close() -> None:
+        async def aclose() -> None:
             nonlocal closed
             closed = True
-            original_close()
+            await original_aclose()
 
-        runtime.close = close  # type: ignore[method-assign]
+        runtime.aclose = aclose  # type: ignore[method-assign]
 
         await service.start()
         await service.stop()
@@ -81,7 +81,13 @@ class ServiceAPITests(unittest.TestCase):
         self.assertEqual(200, dashboard.status_code)
         self.assertIn("Robot Brain", dashboard.text)
         self.assertEqual({"status": "ok", "service_running": True}, health.json())
-        self.assertTrue(status.json()["service"]["running"])
+        status_json = status.json()
+        self.assertTrue(status_json["service"]["running"])
+        # Iteration 18: VLM + explore diagnostics exposed.
+        self.assertIn("vlm", status_json)
+        self.assertFalse(status_json["vlm"]["enabled"])  # VLM off by default
+        self.assertIn("explore", status_json)
+        self.assertIn("last_stop_reason", status_json["explore"])
 
     def test_task_create_query_and_cancel(self) -> None:
         with self.client:

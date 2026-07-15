@@ -1,6 +1,7 @@
 """High-level runtime entry point for commands, interrupts, and resumes."""
 from __future__ import annotations
 
+import logging
 import time
 from typing import Any
 from uuid import uuid4
@@ -42,34 +43,73 @@ from robot_brain.skills.registry import SkillRegistry
 from robot_brain.tools.builtin import default_tools
 from robot_brain.tools.registry import ToolRegistry
 
+logger = logging.getLogger(__name__)
+
 
 def _build_passability(settings: Settings) -> tuple[Any | None, Any | None]:
     """Build a VLM PassabilityAnalyzer when ``RDB_VLM_ENABLED`` is on.
 
     Returns ``(analyzer, frame_source)`` - both ``None`` when VLM is disabled
     (the default), so explore behaves exactly as in iteration 16. The frame
-    source is a still image when ``RDB_VLM_FRAME_PATH`` is set, otherwise a Go2
-    WebRTC tap (unitree+webrtc) or a NullFrameSource (graceful fallback).
-    The frame_source is returned separately so a service can register the Go2
-    tap after ``await conn.connect()``.
+    source is selected by ``RDB_VLM_FRAME_SOURCE`` (auto/file/go2_tap/none);
+    ``RDB_VLM_VIDEO_PRIORITY=relay`` suppresses the Go2 tap so the RTP relay
+    keeps the video track. The frame_source is returned separately so a service
+    can register the Go2 tap after ``await conn.connect()``.
     """
     if not settings.vlm_enabled:
         return None, None
     from robot_brain.vlm.client import VLMClient
-    from robot_brain.vlm.frame_source import FileFrameSource, NullFrameSource
     from robot_brain.vlm.passability import PassabilityAnalyzer
 
-    if settings.vlm_frame_path:
-        frame_source: Any = FileFrameSource(settings.vlm_frame_path)
-    elif settings.robot_backend == "unitree" and settings.unitree_transport == "webrtc":
-        from robot_brain.vlm.frame_source import Go2VideoFrameSource
-
-        frame_source = Go2VideoFrameSource()
-    else:
-        frame_source = NullFrameSource()
-
+    frame_source = _select_frame_source(settings)
     client = VLMClient(settings)
     return PassabilityAnalyzer(client, frame_source, settings), frame_source
+
+
+def _select_frame_source(settings: Settings) -> Any:
+    """Pick the VLM frame source per ``RDB_VLM_FRAME_SOURCE`` / video priority."""
+    from robot_brain.vlm.frame_source import FileFrameSource, NullFrameSource
+
+    choice = settings.vlm_frame_source
+    # relay priority: keep the RTP relay as the sole video consumer -> no tap.
+    can_go2_tap = settings.vlm_video_priority != "relay"
+
+    if choice == "file":
+        return FileFrameSource(settings.vlm_frame_path)
+    if choice == "go2_tap":
+        if can_go2_tap:
+            from robot_brain.vlm.frame_source import Go2VideoFrameSource
+
+            return Go2VideoFrameSource()
+        return NullFrameSource()
+    if choice == "none":
+        return NullFrameSource()
+    # auto
+    if settings.vlm_frame_path:
+        return FileFrameSource(settings.vlm_frame_path)
+    if (
+        can_go2_tap
+        and settings.robot_backend == "unitree"
+        and settings.unitree_transport == "webrtc"
+    ):
+        from robot_brain.vlm.frame_source import Go2VideoFrameSource
+
+        return Go2VideoFrameSource()
+    return NullFrameSource()
+
+
+def _vlm_video_warning(settings: Settings, frame_source_kind: str) -> str:
+    """Warn when the VLM tap and RTP relay would compete for the same track."""
+    if frame_source_kind != "go2_tap":
+        return ""
+    if settings.vlm_video_priority != "vlm":
+        return ""
+    if getattr(settings, "unitree_video_relay", False):
+        return (
+            "VLM tap and RTP relay compete for the same Go2 video track; "
+            "set RDB_VLM_VIDEO_PRIORITY=relay or implement a tee."
+        )
+    return ""
 
 
 class RunResult(BaseModel):
@@ -92,6 +132,7 @@ class AgentRuntime:
         tasks: TaskQueue | None = None,
         summaries: ExecutionSummaryStore | None = None,
         passability_frame_source: Any | None = None,
+        passability: Any | None = None,
     ) -> None:
         self.context = context
         self.checkpoints = checkpoints or CheckpointStore()
@@ -101,8 +142,12 @@ class AgentRuntime:
         #: Go2 VLM frame source (None unless unitree+webrtc+VLM); a service
         #: registers the WebRTC tap via attach_passability_tap() after connect.
         self.passability_frame_source = passability_frame_source
+        #: VLM PassabilityAnalyzer (None unless VLM enabled). Owns the client
+        #: and frame source lifecycle + diagnostics.
+        self.passability = passability
         self._database = database
         self._restored_threads: set[str] = set()
+        self._closed = False
         self.graph: BrainGraph = build_graph(context)
 
     @classmethod
@@ -257,6 +302,7 @@ class AgentRuntime:
             tasks=tasks,
             summaries=summaries,
             passability_frame_source=passability_frame_source,
+            passability=passability,
         )
 
     def attach_passability_tap(self, conn: Any) -> bool:
@@ -417,8 +463,80 @@ class AgentRuntime:
         self._save_world("estop:reset")
 
     def close(self) -> None:
+        """Synchronous best-effort cleanup.
+
+        Closes the DB and stops the frame source synchronously. The VLM client
+        (async httpx) is only closable from an event loop, so when there is no
+        running loop this delegates to :meth:`aclose` via ``asyncio.run``;
+        inside a running loop callers should use ``await aclose()`` instead.
+        Idempotent.
+        """
+        if self._closed:
+            return
+        self._closed = True
+        # Sync parts: frame source + DB.
+        try:
+            if self.passability_frame_source is not None:
+                self.passability_frame_source.stop()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("frame source stop failed: %s", exc)
         if self._database is not None:
             self._database.close()
+        # Async part (VLM client): only if we can run a loop.
+        if self.passability is not None:
+            import asyncio
+
+            try:
+                asyncio.get_running_loop()
+                running = True
+            except RuntimeError:
+                running = False
+            if not running:
+                try:
+                    asyncio.run(self.passability.aclose())
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("passability aclose failed: %s", exc)
+            else:
+                logger.warning(
+                    "AgentRuntime.close() called inside a running loop; "
+                    "VLM client not closed - use await aclose() instead"
+                )
+
+    async def aclose(self) -> None:
+        """Full async cleanup: VLM client + frame source + DB. Idempotent."""
+        if self._closed:
+            return
+        self._closed = True
+        if self.passability is not None:
+            try:
+                await self.passability.aclose()
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("passability aclose failed: %s", exc)
+        elif self.passability_frame_source is not None:
+            try:
+                self.passability_frame_source.stop()
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("frame source stop failed: %s", exc)
+        if self._database is not None:
+            self._database.close()
+
+    def diagnostics(self) -> dict[str, Any]:
+        """VLM + explore diagnostics for the service status API."""
+        settings = self.context.settings
+        vlm: dict[str, Any]
+        if self.passability is not None:
+            vlm = self.passability.diagnostics()
+            vlm["video_priority"] = settings.vlm_video_priority
+            vlm["video_warning"] = _vlm_video_warning(settings, str(vlm.get("frame_source", "")))
+        else:
+            vlm = {
+                "enabled": False,
+                "video_priority": settings.vlm_video_priority,
+                "video_warning": "",
+            }
+        explore_skill = self.context.skills.get("explore")
+        explore = explore_skill.diagnostics() if explore_skill is not None else {}
+        return {"vlm": vlm, "explore": explore}
 
     def _to_result(self, state: GraphState) -> RunResult:
         results = state.get("results", [])

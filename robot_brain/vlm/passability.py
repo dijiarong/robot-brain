@@ -18,6 +18,10 @@ Staleness policy (review P2/P3):
   ``world.passability_hint`` so the StateInterpreter does not keep displaying a
   hint that no longer reflects the current view.
 - **Success**: write the fresh hint onto ``world.passability_hint`` (audit).
+
+Lifecycle: :meth:`aclose` closes the VLM client and stops the frame source;
+idempotent. :meth:`diagnostics` exposes the last hint / error / latency / frame
+age for the service status API.
 """
 from __future__ import annotations
 
@@ -47,6 +51,12 @@ class PassabilityAnalyzer:
         self._frame_source = frame_source
         self._settings = settings
         self._last_call_monotonic: float = 0.0
+        self._closed = False
+        # Diagnostics (for /api/status)
+        self._last_hint: PassabilityHint | None = None
+        self._last_error: str = ""
+        self._last_latency_ms: float | None = None
+        self._last_frame_age_ms: float | None = None
 
     async def analyze_if_due(self, world: "WorldState") -> PassabilityHint | None:
         """Return a fresh hint if due; ``None`` (rule fallback) otherwise.
@@ -64,18 +74,51 @@ class PassabilityAnalyzer:
         try:
             frame = await self._frame_source.get_frame()
             if not frame:
-                self._clear_hint(world)
+                self._record_failure("no frame available", world)
                 return None
             hint = await self._client.analyze_passability(frame)
         except Exception as exc:  # noqa: BLE001 - any failure -> rule fallback
             logger.warning("passability VLM call failed, falling back to rules: %s", exc)
-            self._clear_hint(world)
+            self._record_failure(str(exc), world)
             return None
 
+        self._last_hint = hint
+        self._last_error = ""
+        self._last_latency_ms = hint.latency_ms
+        self._last_frame_age_ms = self._frame_source.frame_age_ms
         world.passability_hint = hint
         return hint
 
-    @staticmethod
-    def _clear_hint(world: "WorldState") -> None:
+    def _record_failure(self, reason: str, world: "WorldState") -> None:
+        self._last_error = reason
+        self._last_hint = None
+        self._last_latency_ms = None
+        self._last_frame_age_ms = self._frame_source.frame_age_ms
         if world.passability_hint is not None:
             world.passability_hint = None
+
+    async def aclose(self) -> None:
+        """Close the VLM client and stop the frame source. Idempotent."""
+        if self._closed:
+            return
+        self._closed = True
+        try:
+            await self._client.aclose()
+        except Exception as exc:  # noqa: BLE001 - best-effort cleanup
+            logger.warning("VLM client close failed: %s", exc)
+        try:
+            self._frame_source.stop()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("frame source stop failed: %s", exc)
+
+    def diagnostics(self) -> dict[str, object]:
+        """Snapshot for the service status API."""
+        last_hint = self._last_hint
+        return {
+            "enabled": True,
+            "frame_source": self._frame_source.kind,
+            "last_hint": last_hint.model_dump(mode="json") if last_hint else None,
+            "last_error": self._last_error,
+            "last_latency_ms": self._last_latency_ms,
+            "last_frame_age_ms": self._last_frame_age_ms,
+        }
