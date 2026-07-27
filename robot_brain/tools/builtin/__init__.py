@@ -3,8 +3,15 @@ from __future__ import annotations
 
 from robot_brain.tools.base import Tool
 from robot_brain.tools.builtin.control import Go2DriveSegmentTool, StopMotionTool
+from robot_brain.tools.builtin.navigation import NavigationGetStateTool
 
-__all__ = ["Go2DriveSegmentTool", "StopMotionTool", "default_tools", "go2_tools"]
+__all__ = [
+    "Go2DriveSegmentTool",
+    "NavigationGetStateTool",
+    "StopMotionTool",
+    "default_tools",
+    "go2_tools",
+]
 
 
 def default_tools() -> list[Tool]:

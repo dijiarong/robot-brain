@@ -44,6 +44,9 @@ class MockRobot(RobotInterface):
     async def report(self, message: str, severity: str) -> None:
         self._record("report", message=message, severity=severity)
 
+    async def wave(self) -> None:
+        self._record("wave")
+
     async def get_state(self) -> RobotState:
         return self.state.model_copy(deep=True)
 

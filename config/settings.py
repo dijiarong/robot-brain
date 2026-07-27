@@ -40,6 +40,30 @@ class Settings:
     enable_verbose_log: bool = field(default_factory=lambda: _env_bool("RDB_VERBOSE", True))
     max_conversation_context: int = 10  # max messages fetched from DB for LLM context
 
+    # External navigation provider. auto = Fake on mock, disabled on real robot;
+    # nav2 = connect to the topsun-bot/Navigation ROS2 graph lazily.
+    navigation_backend: str = field(
+        default_factory=lambda: os.getenv("RDB_NAVIGATION_BACKEND", "auto")
+    )
+    nav2_action_name: str = field(
+        default_factory=lambda: os.getenv("RDB_NAV2_ACTION_NAME", "/navigate_to_pose")
+    )
+    nav2_odom_topic: str = field(
+        default_factory=lambda: os.getenv("RDB_NAV2_ODOM_TOPIC", "/odom")
+    )
+    nav2_goal_frame: str = field(
+        default_factory=lambda: os.getenv("RDB_NAV2_GOAL_FRAME", "odom")
+    )
+    nav2_server_timeout_s: float = field(
+        default_factory=lambda: float(os.getenv("RDB_NAV2_SERVER_TIMEOUT_S", "2.0"))
+    )
+    nav2_pose_timeout_s: float = field(
+        default_factory=lambda: float(os.getenv("RDB_NAV2_POSE_TIMEOUT_S", "1.0"))
+    )
+    nav2_cancel_timeout_s: float = field(
+        default_factory=lambda: float(os.getenv("RDB_NAV2_CANCEL_TIMEOUT_S", "2.0"))
+    )
+
     # Local persistence.
     memory_db_path: str = field(default_factory=lambda: os.getenv("RDB_MEMORY_DB", "data/robot_brain.sqlite3"))
 

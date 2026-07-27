@@ -30,7 +30,18 @@ class PlannerCatalog:
         every registered skill.
         """
         if self.backend == "unitree":
-            return set(UNITREE_LLM_SKILLS)
+            visible = set(UNITREE_LLM_SKILLS)
+            for name in self.skills.names():
+                skill = self.skills.get(name)
+                metadata = getattr(skill, "capability_metadata", None)
+                if metadata is None or not metadata.planner_visible:
+                    continue
+                if (
+                    metadata.backend_allowlist is None
+                    or self.backend in metadata.backend_allowlist
+                ):
+                    visible.add(name)
+            return visible
         return set(self.skills.names())
 
     def planner_tools(self, *, strict: bool = True) -> list[dict[str, object]]:

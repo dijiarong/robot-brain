@@ -11,6 +11,7 @@ from robot_brain.memory.conversation import ConversationMemory
 from robot_brain.memory.long_term import LongTermMemory
 from robot_brain.memory.short_term import ShortTermMemory
 from robot_brain.memory.world_state import WorldStateMemory
+from robot_brain.navigation import NavigationClient
 from robot_brain.perception.base import PerceptionAdapter
 from robot_brain.safety.estop import EmergencyStop
 from robot_brain.safety.validator import SafetyValidator
@@ -35,3 +36,6 @@ class AgentContext:
     #: Runtime-internal atomic tools. Skills delegate to these; the
     #: PlannerCatalog may expose a safe subset to the LLM in future iterations.
     tools: ToolRegistry | None = None
+    #: Optional external navigation provider. Mock runtimes receive a
+    #: FakeNavigationClient; real backends must inject an adapter explicitly.
+    navigation: NavigationClient | None = None

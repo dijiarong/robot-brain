@@ -152,6 +152,7 @@ class UnitreeRobot(RobotInterface):
             "damp",
             "sit",
             "free_walk",
+            "hello",
         }
     )
 
@@ -297,6 +298,11 @@ class UnitreeRobot(RobotInterface):
             logger.error("set_posture(%s) failed, issuing best-effort stop: %s", posture, exc)
             await self.stop(f"set_posture exception: {exc}")
             raise RuntimeError(f"Unitree set_posture failed: {exc}") from exc
+
+    async def wave(self) -> None:
+        """Run Go2's built-in Hello gesture (a front-leg wave)."""
+        self._record("wave", gesture="hello")
+        await self.set_posture("hello")
 
     async def enable_omni_teleop(self) -> None:
         """Enable SwitchJoystick + low SpeedLevel after FreeWalk (WebRTC MCF)."""

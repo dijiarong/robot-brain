@@ -25,6 +25,7 @@ from robot_brain.memory.short_term import ShortTermMemory
 from robot_brain.memory.sqlite_store import SQLiteMemoryStore
 from robot_brain.memory.task_queue import TaskQueue
 from robot_brain.memory.world_state import WorldStateMemory
+from robot_brain.navigation import FakeNavigationClient, NavigationClient
 from robot_brain.orchestration.graph import BrainGraph, build_graph
 from robot_brain.orchestration.state import GraphState
 from robot_brain.perception.base import PerceptionAdapter
@@ -165,6 +166,7 @@ class AgentRuntime:
         world_states: WorldStateMemory | None = None,
         tasks: TaskQueue | None = None,
         summaries: ExecutionSummaryStore | None = None,
+        navigation: NavigationClient | None = None,
     ) -> "AgentRuntime":
         settings = settings or SETTINGS
         database: SQLiteMemoryStore | None = None
@@ -210,11 +212,39 @@ class AgentRuntime:
             else:
                 raise ValueError(f"unsupported perception backend: {settings.perception_backend}")
         passability, passability_frame_source = _build_passability(settings)
+        spatial_skill_set = []
+        if passability is not None and passability_frame_source is not None:
+            from robot_brain.memory.spatial import SpatialMemoryStore
+            from robot_brain.skills.builtin.spatial_memory import FindObjectSkill, RememberRoomSkill
+            from robot_brain.vlm.object_recognition import ObjectRecognizer
+
+            spatial_store = SpatialMemoryStore(settings.memory_db_path)
+            recognizer = ObjectRecognizer(passability._client)
+            spatial_skill_set = [
+                RememberRoomSkill(spatial_store, passability_frame_source, recognizer),
+                FindObjectSkill(spatial_store, passability_frame_source, recognizer),
+            ]
+        if navigation is None:
+            if settings.navigation_backend == "nav2":
+                from robot_brain.navigation.nav2 import create_nav2_navigation_client
+
+                navigation = create_nav2_navigation_client(settings)
+            elif settings.robot_backend == "mock" and settings.navigation_backend in {"auto", "fake"}:
+                navigation = FakeNavigationClient()
+
+        navigation_tools = []
+        navigation_skill_set = []
+        if navigation is not None:
+            from robot_brain.skills.builtin.navigation import navigation_skills
+            from robot_brain.tools.builtin.navigation import NavigationGetStateTool
+
+            navigation_tools = [NavigationGetStateTool(navigation)]
+            navigation_skill_set = navigation_skills(navigation)
         if settings.robot_backend == "unitree":
             from robot_brain.skills.builtin.go2_catalog import go2_skills
             from robot_brain.tools.builtin import go2_tools
 
-            tool_registry = ToolRegistry(default_tools() + go2_tools())
+            tool_registry = ToolRegistry(default_tools() + go2_tools() + navigation_tools)
             stop_tool = tool_registry.get("stop_motion")
             drive_tool = tool_registry.get("go2_drive_segment")
             skills = SkillRegistry(
@@ -225,15 +255,19 @@ class AgentRuntime:
                     drive_tool=drive_tool,
                     passability=passability,
                 )
+                + navigation_skill_set
+                + spatial_skill_set
             )
         else:
             from robot_brain.skills.builtin.explore import ExploreSkill
 
-            tool_registry = ToolRegistry(default_tools())
+            tool_registry = ToolRegistry(default_tools() + navigation_tools)
             stop_tool = tool_registry.get("stop_motion")
             skills = SkillRegistry(
                 default_skills(stop_tool=stop_tool)
                 + [ExploreSkill(settings, perception=perception, passability=passability)]
+                + navigation_skill_set
+                + spatial_skill_set
             )
         if llm is None:
             if settings.llm_backend == "mock":
@@ -293,6 +327,7 @@ class AgentRuntime:
             world_states=world_states,
             conversations=conversations,
             tools=tool_registry,
+            navigation=navigation,
         )
         return cls(
             context,
@@ -482,6 +517,12 @@ class AgentRuntime:
             logger.warning("frame source stop failed: %s", exc)
         if self._database is not None:
             self._database.close()
+        navigation_close = getattr(self.context.navigation, "close", None)
+        if callable(navigation_close):
+            try:
+                navigation_close()
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("navigation close failed: %s", exc)
         # Async part (VLM client): only if we can run a loop.
         if self.passability is not None:
             import asyncio
@@ -517,6 +558,19 @@ class AgentRuntime:
                 self.passability_frame_source.stop()
             except Exception as exc:  # noqa: BLE001
                 logger.warning("frame source stop failed: %s", exc)
+        navigation_aclose = getattr(self.context.navigation, "aclose", None)
+        if callable(navigation_aclose):
+            try:
+                await navigation_aclose()
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("navigation aclose failed: %s", exc)
+        else:
+            navigation_close = getattr(self.context.navigation, "close", None)
+            if callable(navigation_close):
+                try:
+                    navigation_close()
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("navigation close failed: %s", exc)
         if self._database is not None:
             self._database.close()
 
@@ -536,7 +590,13 @@ class AgentRuntime:
             }
         explore_skill = self.context.skills.get("explore")
         explore = explore_skill.diagnostics() if explore_skill is not None else {}
-        return {"vlm": vlm, "explore": explore}
+        navigation = self.context.navigation
+        nav = {
+            "backend": settings.navigation_backend,
+            "configured": navigation is not None,
+            "provider": type(navigation).__name__ if navigation is not None else None,
+        }
+        return {"vlm": vlm, "explore": explore, "navigation": nav}
 
     def _to_result(self, state: GraphState) -> RunResult:
         results = state.get("results", [])

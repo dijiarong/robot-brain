@@ -37,6 +37,10 @@ class RobotInterface(ABC):
     @abstractmethod
     async def report(self, message: str, severity: str) -> None: ...
 
+    async def wave(self) -> None:
+        """Optional social gesture; adapters may provide a native implementation."""
+        await self.report("wave", "info")
+
     @abstractmethod
     async def get_state(self) -> RobotState: ...
 

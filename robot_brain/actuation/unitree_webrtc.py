@@ -62,6 +62,7 @@ _SPORT_API_ID: dict[str, int] = {
     "sport_move": 1008,        # Move(vx, vy, vyaw) — omni velocity on sport API
     "switch_joystick": 1027, # SwitchJoystick — enable stick/Move control path
     "speed_level": 1015,     # SpeedLevel — gait speed (1=slow for teleop)
+    "hello": 1016,           # Hello — built-in front-leg wave gesture
 }
 # Joystick (wireless controller) channel — emulates the remote/app sticks. This
 # is what actually drives the Go2 on firmware where SPORT_MOD posture commands
