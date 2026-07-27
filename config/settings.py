@@ -41,7 +41,8 @@ class Settings:
     max_conversation_context: int = 10  # max messages fetched from DB for LLM context
 
     # External navigation provider. auto = Fake on mock, disabled on real robot;
-    # nav2 = connect to the topsun-bot/Navigation ROS2 graph lazily.
+    # nav2 = connect to the topsun-bot/Navigation ROS2 graph lazily;
+    # direct_go2 = bounded local goals using built-in odom + LiDAR.
     navigation_backend: str = field(
         default_factory=lambda: os.getenv("RDB_NAVIGATION_BACKEND", "auto")
     )
@@ -54,6 +55,18 @@ class Settings:
     nav2_goal_frame: str = field(
         default_factory=lambda: os.getenv("RDB_NAV2_GOAL_FRAME", "odom")
     )
+    nav2_map_frame: str = field(
+        default_factory=lambda: os.getenv("RDB_NAV2_MAP_FRAME", "map")
+    )
+    nav2_base_frame: str = field(
+        default_factory=lambda: os.getenv("RDB_NAV2_BASE_FRAME", "base_link")
+    )
+    nav2_map_id: str = field(
+        default_factory=lambda: os.getenv("RDB_NAV2_MAP_ID", "")
+    )
+    nav2_map_version: str | None = field(
+        default_factory=lambda: os.getenv("RDB_NAV2_MAP_VERSION") or None
+    )
     nav2_server_timeout_s: float = field(
         default_factory=lambda: float(os.getenv("RDB_NAV2_SERVER_TIMEOUT_S", "2.0"))
     )
@@ -62,6 +75,24 @@ class Settings:
     )
     nav2_cancel_timeout_s: float = field(
         default_factory=lambda: float(os.getenv("RDB_NAV2_CANCEL_TIMEOUT_S", "2.0"))
+    )
+    direct_nav_pointcloud_max_age_s: float = field(
+        default_factory=lambda: float(os.getenv("RDB_DIRECT_NAV_POINTCLOUD_MAX_AGE_S", "0.5"))
+    )
+    direct_nav_segment_duration_s: float = field(
+        default_factory=lambda: float(os.getenv("RDB_DIRECT_NAV_SEGMENT_DURATION_S", "0.25"))
+    )
+    direct_nav_obstacle_stop_m: float = field(
+        default_factory=lambda: float(os.getenv("RDB_DIRECT_NAV_OBSTACLE_STOP_M", "0.45"))
+    )
+    direct_nav_obstacle_half_width_m: float = field(
+        default_factory=lambda: float(os.getenv("RDB_DIRECT_NAV_OBSTACLE_HALF_WIDTH_M", "0.28"))
+    )
+    direct_nav_no_progress_segments: int = field(
+        default_factory=lambda: int(os.getenv("RDB_DIRECT_NAV_NO_PROGRESS_SEGMENTS", "2"))
+    )
+    direct_nav_require_robotodom: bool = field(
+        default_factory=lambda: _env_bool("RDB_DIRECT_NAV_REQUIRE_ROBOTODOM", True)
     )
 
     # Local persistence.
@@ -75,6 +106,11 @@ class Settings:
     unitree_model: str = field(default_factory=lambda: os.getenv("RDB_UNITREE_MODEL", "go2"))
     # CycloneDDS network interface name for SDK transport (e.g. "en0"), NOT robot IP.
     unitree_net_iface: str = field(default_factory=lambda: os.getenv("RDB_UNITREE_NET_IFACE", ""))
+    # WebRTC route: auto prefers an explicit LAN IP, otherwise uses Unitree
+    # cloud when serial + account credentials are configured.
+    unitree_webrtc_connection_mode: str = field(
+        default_factory=lambda: os.getenv("RDB_UNITREE_WEBRTC_CONNECTION_MODE", "auto")
+    )
     # Robot IP for WebRTC LocalSTA (router/LAN or AP mode).
     # Also reads UNITREE_ROBOT_IP, DIMOS_ROBOT_IP, ROBOT_IP (DimOS convention).
     unitree_robot_ip: str = field(
@@ -85,8 +121,35 @@ class Settings:
             or os.getenv("ROBOT_IP", "")
         )
     )
-    # Optional Go2 serial for WebRTC multicast discovery when IP is unknown.
+    # Go2 serial: optional for LAN discovery, required for cloud Remote mode.
     unitree_serial: str = field(default_factory=lambda: os.getenv("RDB_UNITREE_SERIAL", ""))
+    # Unitree cloud login for WebRTC Remote mode.  Keep the password in the
+    # process environment; repr=False prevents accidental Settings dumps.
+    unitree_cloud_username: str = field(
+        default_factory=lambda: os.getenv("RDB_UNITREE_CLOUD_USERNAME", "")
+    )
+    unitree_cloud_password: str = field(
+        default_factory=lambda: os.getenv("RDB_UNITREE_CLOUD_PASSWORD", ""),
+        repr=False,
+    )
+    unitree_cloud_region: str = field(
+        default_factory=lambda: os.getenv("RDB_UNITREE_CLOUD_REGION", "global")
+    )
+    unitree_cloud_device_type: str = field(
+        default_factory=lambda: os.getenv("RDB_UNITREE_CLOUD_DEVICE_TYPE", "Go2")
+    )
+    # Request the built-in Go2 LiDAR stream. direct_go2 navigation enables it
+    # automatically; this flag also allows sensor-only diagnostics.
+    unitree_lidar_stream: bool = field(
+        default_factory=lambda: _env_bool("RDB_UNITREE_LIDAR_STREAM", False)
+    )
+    # Raw voxel_map can be expensive over 4G. Keep it opt-in and use only to
+    # diagnose firmware that does not publish voxel_map_compressed.
+    unitree_lidar_allow_uncompressed: bool = field(
+        default_factory=lambda: _env_bool(
+            "RDB_UNITREE_LIDAR_ALLOW_UNCOMPRESSED", False
+        )
+    )
     unitree_dry_run: bool = field(default_factory=lambda: _env_bool("RDB_UNITREE_DRY_RUN", True))
     # Hard gate for real motion on live transports (webrtc/sdk). Even with
     # dry_run disabled, posture/stop commands are only sent when this is true.

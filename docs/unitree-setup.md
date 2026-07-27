@@ -20,8 +20,11 @@
 # 基础项目
 pip install -e .
 
-# WebRTC 实机（可选 extra）
-pip install -e ".[unitree]"
+# WebRTC 实机（云端 4G 或局域网；不安装 DDS SDK）
+pip install -e ".[unitree-webrtc]"
+
+# 只有同时需要 WebRTC 和 CycloneDDS SDK 时才使用：
+# pip install -e ".[unitree]"
 ```
 
 未安装 WebRTC 依赖时，使用 `RDB_UNITREE_TRANSPORT=fake` 仍可跑完全部测试与 dry-run 示例。
@@ -56,6 +59,24 @@ export RDB_UNITREE_ROBOT_IP=10.10.196.239
 export UNITREE_AES_128_KEY=<32-hex>
 ```
 
+### 通过 4G / 宇树云端连接（不需要机器人 IP）
+
+机器人不在同一局域网、但已通过 4G 在线时，可以用宇树账号和设备序列号走
+WebRTC Remote：
+
+```bash
+export RDB_UNITREE_TRANSPORT=webrtc
+export RDB_UNITREE_WEBRTC_CONNECTION_MODE=remote
+export RDB_UNITREE_SERIAL=<设备序列号>
+export RDB_UNITREE_CLOUD_USERNAME=<宇树账号>
+export RDB_UNITREE_CLOUD_PASSWORD=<宇树密码>
+export RDB_UNITREE_CLOUD_REGION=cn
+```
+
+密码只从环境变量读取，不要写入仓库、`.env` 示例或命令输出。中国区注册账号使用
+`cn`；海外账号使用 `global`。`auto` 模式下，有显式机器人 IP 时优先局域网；没有
+IP 且序列号、账号、密码齐全时自动切换云端。
+
 ## 环境变量
 
 ### 基础
@@ -64,9 +85,16 @@ export UNITREE_AES_128_KEY=<32-hex>
 |------|--------|------|
 | `RDB_ROBOT` | `mock` | 设为 `unitree` 启用 Unitree 适配器 |
 | `RDB_UNITREE_TRANSPORT` | `fake` | `fake` / `sdk` / `webrtc` |
+| `RDB_UNITREE_WEBRTC_CONNECTION_MODE` | `auto` | `auto` / `local` / `remote`；远程 4G 使用 `remote` |
 | `RDB_UNITREE_MODEL` | `go2` | 机型标识 |
 | `RDB_UNITREE_ROBOT_IP` | 空 | WebRTC LAN IP；亦读 `UNITREE_ROBOT_IP`、`DIMOS_ROBOT_IP`、`ROBOT_IP` |
-| `RDB_UNITREE_SERIAL` | 空 | 可选，组播发现用序列号 |
+| `RDB_UNITREE_SERIAL` | 空 | 局域网发现可选；云端 Remote 必填 |
+| `RDB_UNITREE_CLOUD_USERNAME` | 空 | 宇树云账号；Remote 必填 |
+| `RDB_UNITREE_CLOUD_PASSWORD` | 空 | 宇树云密码；Remote 必填，禁止提交仓库 |
+| `RDB_UNITREE_CLOUD_REGION` | `global` | 中国区账号设 `cn`，海外账号用 `global` |
+| `RDB_UNITREE_CLOUD_DEVICE_TYPE` | `Go2` | 云端 AppName/设备类型 |
+| `RDB_UNITREE_LIDAR_STREAM` | `false` | 显式请求自带 LiDAR 点云；`direct_go2` 导航会自动开启 |
+| `RDB_UNITREE_LIDAR_ALLOW_UNCOMPRESSED` | `false` | 诊断未压缩点云回退；4G 流量较大，不建议常开 |
 | `RDB_UNITREE_NET_IFACE` | 空 | SDK 用 CycloneDDS 网卡名（如 `en0`），**不是**机器人 IP |
 | `RDB_UNITREE_MOTION_MODE` | `mcf` | WebRTC 连接后 motion switcher 模式 |
 
@@ -94,6 +122,17 @@ export UNITREE_AES_128_KEY=<32-hex>
 
 ## 验证流程
 
+### 0. 空间记忆离线闭环
+
+无需 ROS2 或真机，验证所有房间/物品移动均经过可替换 Navigation Provider：
+
+```bash
+python scripts/verify_spatial_memory_navigation.py
+```
+
+报告需满足 `ok=true` 且 `forbidden_direct_motion=[]`，导航记录应包含
+`set_absolute_goal` 和目标途中命中后的 `cancel`。
+
 ### 1. Fake / dry-run（无需真机）
 
 ```bash
@@ -106,8 +145,22 @@ python -m examples.run_unitree_teleop_web --transport fake
 
 ```bash
 export RDB_UNITREE_ROBOT_IP=<ip>
-python -m examples.run_unitree_smoke --transport webrtc --state-only --live
+python -m examples.run_unitree_smoke --transport webrtc --state-only
 ```
+
+自带 LiDAR + odom 局部导航只读验收（不会发送运动）：
+
+```bash
+export RDB_UNITREE_ROBOT_IP=<ip>
+python scripts/verify_direct_go2_navigation.py
+```
+
+成功报告必须同时满足：`sensor_snapshot.ready=true`、`pose_source` 为
+`unitree_robotodom`、点数大于零、`obstacle_frame=base_link`。导航位姿订阅
+Go2 `rt/utlidar/robot_pose`，SportModeState.position 只作为诊断回退，默认不允许
+驱动局部导航。若原始点云为 `world`，只有点云携带的原点与
+Go2 odom 一致时才会安全转换到 `base_link`，否则报告
+`untrusted_obstacle_frame`。
 
 ### 3. WebRTC 姿态（需 motion gate）
 
@@ -118,6 +171,17 @@ RDB_UNITREE_ENABLE_MOTION=true python -m examples.run_unitree_smoke \
 ```
 
 启动时会要求输入确认短语。
+
+局部导航小步 live 验收应在姿态和只读 LiDAR 验收通过之后执行：
+
+```bash
+export RDB_UNITREE_ROBOT_IP=<ip>
+python scripts/verify_direct_go2_navigation.py \
+  --live --confirm I_UNDERSTAND_DIRECT_GO2_NAV --forward-m 0.1
+```
+
+脚本以 0.25 秒小段执行，每段前重新检查点云。点云/odom 过期、路径中出现
+障碍、连续无位移或超时都会停止，输出结构化 `final_state.error_code`。
 
 ### 4. 分级真机验收（Level 0–5）
 

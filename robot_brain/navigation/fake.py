@@ -5,9 +5,14 @@ from collections import deque
 from collections.abc import Iterable
 from datetime import datetime, timezone
 import math
+from uuid import uuid4
 
 from robot_brain.navigation.base import (
     NavigationClient,
+    AbsoluteNavigationGoal,
+    LocalizationState,
+    LocalizationStatus,
+    MapIdentity,
     NavigationGoalHandle,
     NavigationPose,
     NavigationState,
@@ -26,6 +31,7 @@ class FakeNavigationClient(NavigationClient):
         *,
         ready: bool = True,
         pose: NavigationPose | None = None,
+        map_identity: MapIdentity | None = None,
     ) -> None:
         self._outcomes = deque(outcomes or [NavigationStatus.SUCCEEDED])
         self._state = NavigationState(
@@ -35,12 +41,22 @@ class FakeNavigationClient(NavigationClient):
             pose=pose or NavigationPose(),
         )
         self._next_goal_number = 1
+        self._map_identity = map_identity or MapIdentity(
+            map_id=f"fake-session-{uuid4().hex}",
+            frame_id="odom",
+            persistent=False,
+        )
         self._active_goal: RelativeNavigationGoal | None = None
+        self._active_absolute_goal: AbsoluteNavigationGoal | None = None
         self._pending_outcome: NavigationStatus | None = None
         self.command_history: list[dict[str, object]] = []
 
     def queue_outcome(self, status: NavigationStatus) -> None:
         self._outcomes.append(status)
+
+    @property
+    def supports_absolute_goals(self) -> bool:
+        return self._map_identity.persistent
 
     async def get_state(self) -> NavigationState:
         if self._state.status == NavigationStatus.ACTIVE and self._pending_outcome is not None:
@@ -65,6 +81,7 @@ class FakeNavigationClient(NavigationClient):
         goal_id = f"fake-nav-{self._next_goal_number}"
         self._next_goal_number += 1
         self._active_goal = goal.model_copy(deep=True)
+        self._active_absolute_goal = None
         self._pending_outcome = (
             self._outcomes.popleft() if self._outcomes else NavigationStatus.SUCCEEDED
         )
@@ -81,6 +98,53 @@ class FakeNavigationClient(NavigationClient):
             {"action": "set_relative_goal", "goal_id": goal_id, "goal": goal.model_dump()}
         )
         return NavigationGoalHandle(goal_id=goal_id, message="relative goal accepted")
+
+    async def get_localization_state(self) -> LocalizationState:
+        return LocalizationState(
+            status=(
+                LocalizationStatus.LOCALIZED
+                if self._map_identity.persistent
+                else LocalizationStatus.LOCAL
+            ),
+            map_identity=self._map_identity,
+            pose=self._state.pose,
+            confidence=1.0,
+            message="fake localization ready",
+        )
+
+    async def set_absolute_goal(
+        self, goal: AbsoluteNavigationGoal
+    ) -> NavigationGoalHandle:
+        if not self._state.ready:
+            raise NavigationUnavailableError("fake navigation provider is unavailable")
+        if goal.map_id != self._map_identity.map_id or (
+            goal.map_version is not None
+            and goal.map_version != self._map_identity.version
+        ):
+            raise NavigationUnavailableError("absolute goal belongs to a different map")
+        if goal.pose.frame_id != self._map_identity.frame_id:
+            raise NavigationUnavailableError("absolute goal frame does not match map frame")
+        if self._state.status == NavigationStatus.ACTIVE:
+            return NavigationGoalHandle(
+                goal_id=self._state.goal_id or "", accepted=False,
+                message="another navigation goal is active",
+            )
+        goal_id = f"fake-nav-{self._next_goal_number}"
+        self._next_goal_number += 1
+        self._active_goal = None
+        self._active_absolute_goal = goal.model_copy(deep=True)
+        self._pending_outcome = (
+            self._outcomes.popleft() if self._outcomes else NavigationStatus.SUCCEEDED
+        )
+        self._state = NavigationState(
+            provider="fake", ready=True, status=NavigationStatus.ACTIVE,
+            goal_id=goal_id, pose=self._state.pose, progress=0.0,
+            message="absolute goal accepted",
+        )
+        self.command_history.append(
+            {"action": "set_absolute_goal", "goal_id": goal_id, "goal": goal.model_dump()}
+        )
+        return NavigationGoalHandle(goal_id=goal_id, message="absolute goal accepted")
 
     async def cancel(self, goal_id: str | None = None) -> NavigationState:
         active_id = self._state.goal_id
@@ -116,6 +180,8 @@ class FakeNavigationClient(NavigationClient):
                     ) % 360.0 - 180.0,
                 }
             )
+        elif status == NavigationStatus.SUCCEEDED and self._active_absolute_goal is not None:
+            pose = self._active_absolute_goal.pose.model_copy(deep=True)
         messages = {
             NavigationStatus.SUCCEEDED: "relative goal reached",
             NavigationStatus.FAILED: "navigation failed",
@@ -136,3 +202,4 @@ class FakeNavigationClient(NavigationClient):
             }
         )
         self._active_goal = None
+        self._active_absolute_goal = None

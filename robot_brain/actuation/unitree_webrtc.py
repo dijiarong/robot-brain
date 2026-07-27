@@ -1,4 +1,4 @@
-"""Unitree Go2 transport via WebRTC data channel (LocalSTA mode).
+"""Unitree Go2 transport via WebRTC data channel (LAN or cloud Remote mode).
 
 Uses unitree-webrtc-connect to communicate with Go2 over the local network
 (router/STA mode). This works when Go2 and the dev machine are on the same
@@ -35,7 +35,7 @@ import socket
 import threading
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 from typing import Any
 
@@ -131,7 +131,12 @@ class NetworkUnreachableError(ConnectionError):
     """Network-level failure — retry with backoff may help."""
 
 
-def _classify_connect_error(exc: BaseException, aes_key_set: bool) -> ConnectionError:
+def _classify_connect_error(
+    exc: BaseException,
+    aes_key_set: bool,
+    *,
+    remote: bool = False,
+) -> ConnectionError:
     """Wrap a raw connect exception into a classified error for smart retry."""
     msg = str(exc)
 
@@ -142,7 +147,7 @@ def _classify_connect_error(exc: BaseException, aes_key_set: bool) -> Connection
         hint_parts = [
             "Go2 WebRTC slot occupied — ICE completed but DTLS/data-channel failed.",
         ]
-        if not aes_key_set:
+        if not remote and not aes_key_set:
             hint_parts.append(
                 "UNITREE_AES_128_KEY is NOT set. "
                 "Go2 firmware >= 1.1.15 requires it for DTLS handshake."
@@ -160,9 +165,10 @@ def _classify_connect_error(exc: BaseException, aes_key_set: bool) -> Connection
     # -- Auth / permission --
     if any(phrase in msg.lower() for phrase in (
         "aes", "key", "unauthorized", "forbidden", "permission",
-        "401", "403",
+        "login", "password", "token", "account", "401", "403",
     )):
-        return AuthError(f"AES key or auth failure: {msg[:300]}")
+        prefix = "Unitree cloud login or device authorization failed" if remote else "AES key or auth failure"
+        return AuthError(f"{prefix}: {msg[:300]}")
 
     # -- Network unreachable --
     if any(phrase in msg.lower() for phrase in (
@@ -228,6 +234,15 @@ class WebRTCHealth:
     last_state_update: float = 0.0
     sport_state_count: int = 0
     low_state_count: int = 0
+    lidar_compressed_message_count: int = 0
+    lidar_uncompressed_message_count: int = 0
+    lidar_state_count: int = 0
+    last_lidar_state: Any = None
+    lidar_frame_count: int = 0
+    last_lidar_update: float = 0.0
+    lidar_timestamp_repair_count: int = 0
+    odom_frame_count: int = 0
+    last_odom_update: float = 0.0
     drive_streams_active: int = 0
     bridge_call_timeouts: int = 0
 
@@ -299,6 +314,53 @@ def _extract_ultrasonic_from_dict(low: dict[str, Any]) -> tuple[float, float, fl
         return None
 
 
+def _parse_robot_odom(message: Any) -> dict[str, Any] | None:
+    """Parse ``rt/utlidar/robot_pose`` into the shared Go2 odom frame."""
+    if isinstance(message, str):
+        try:
+            message = json.loads(message)
+        except json.JSONDecodeError:
+            return None
+    if not isinstance(message, dict):
+        return None
+    data = message.get("data", message)
+    if not isinstance(data, dict):
+        return None
+    pose = data.get("pose")
+    header = data.get("header", {})
+    if not isinstance(pose, dict) or not isinstance(header, dict):
+        return None
+    position = pose.get("position")
+    orientation = pose.get("orientation")
+    if not isinstance(position, dict) or not isinstance(orientation, dict):
+        return None
+    try:
+        x, y = float(position["x"]), float(position["y"])
+        qx = float(orientation.get("x", 0.0))
+        qy = float(orientation.get("y", 0.0))
+        qz = float(orientation.get("z", 0.0))
+        qw = float(orientation.get("w", 1.0))
+        values = (x, y, qx, qy, qz, qw)
+        if not all(math.isfinite(value) for value in values):
+            return None
+        norm = math.sqrt(qx * qx + qy * qy + qz * qz + qw * qw)
+        if norm <= 1e-9:
+            return None
+        qx, qy, qz, qw = (value / norm for value in (qx, qy, qz, qw))
+        siny = 2.0 * (qw * qz + qx * qy)
+        cosy = 1.0 - 2.0 * (qy * qy + qz * qz)
+        stamp = header.get("stamp", {})
+        sensor_timestamp = None
+        if isinstance(stamp, dict):
+            sensor_timestamp = float(stamp.get("sec", 0)) + float(stamp.get("nanosec", 0)) / 1e9
+        return {
+            "position": Position(x=x, y=y),
+            "heading_degrees": math.degrees(math.atan2(siny, cosy)),
+            "frame_id": str(header.get("frame_id") or "odom"),
+            "timestamp": sensor_timestamp if sensor_timestamp and sensor_timestamp > 0 else None,
+        }
+    except (KeyError, TypeError, ValueError, OverflowError):
+        return None
 def _resolve_connect_target(settings: Settings) -> tuple[str | None, str | None, bool]:
     """Return (ip, serial, ip_is_default_fallback)."""
     ip = settings.unitree_robot_ip or None
@@ -306,6 +368,37 @@ def _resolve_connect_target(settings: Settings) -> tuple[str | None, str | None,
     if not ip and not serial:
         return _AP_MODE_DEFAULT_IP, None, True
     return ip, serial, False
+
+
+def _resolve_connection_mode(settings: Settings) -> str:
+    """Resolve auto/local/remote without exposing cloud credentials."""
+    mode = settings.unitree_webrtc_connection_mode.strip().lower()
+    if mode not in {"auto", "local", "remote"}:
+        raise ValueError(
+            "RDB_UNITREE_WEBRTC_CONNECTION_MODE must be auto, local, or remote"
+        )
+    if mode != "auto":
+        return mode
+    if settings.unitree_robot_ip:
+        return "local"
+    if (
+        settings.unitree_serial
+        and settings.unitree_cloud_username
+        and settings.unitree_cloud_password
+    ):
+        return "remote"
+    return "local"
+
+
+def _connection_target(settings: Settings) -> str:
+    """Return a secret-free connection description for logs and errors."""
+    mode = _resolve_connection_mode(settings)
+    if mode == "remote":
+        serial = settings.unitree_serial or "missing"
+        region = settings.unitree_cloud_region or "global"
+        return f"cloud serial={serial}, region={region}"
+    ip, serial, _ = _resolve_connect_target(settings)
+    return f"serial={serial}" if serial and not ip else f"ip={ip}"
 
 
 def _robot_port_reachable(ip: str, port: int = _GO2_WEBRTC_PORT, timeout: float = 2.0) -> bool:
@@ -469,23 +562,40 @@ async def _do_connect(
 
     UnitreeWebRTCConnection, WebRTCConnectionMethod, RTC_TOPIC = _import_webrtc()
 
+    mode = _resolve_connection_mode(settings)
     ip, serial, ip_is_default = _resolve_connect_target(settings)
     aes_key = _aes_key_from_env()
 
-    if ip and not _robot_port_reachable(ip):
+    if mode == "local" and ip and not _robot_port_reachable(ip):
         raise NetworkUnreachableError(
             _connect_hint(ip, ip_is_default=ip_is_default, aes_key=aes_key)
         )
 
     init_params = inspect.signature(UnitreeWebRTCConnection.__init__).parameters
-    kwargs: dict[str, Any] = {
-        "connectionMethod": WebRTCConnectionMethod.LocalSTA,
-    }
+    kwargs: dict[str, Any]
+    if mode == "remote":
+        if not serial:
+            raise ValueError("RDB_UNITREE_SERIAL is required for Unitree cloud Remote mode")
+        if not settings.unitree_cloud_username or not settings.unitree_cloud_password:
+            raise ValueError(
+                "RDB_UNITREE_CLOUD_USERNAME and RDB_UNITREE_CLOUD_PASSWORD are required "
+                "for Unitree cloud Remote mode"
+            )
+        kwargs = {
+            "connectionMethod": WebRTCConnectionMethod.Remote,
+            "serialNumber": serial,
+            "username": settings.unitree_cloud_username,
+            "password": settings.unitree_cloud_password,
+            "region": settings.unitree_cloud_region,
+            "device_type": settings.unitree_cloud_device_type,
+        }
+    else:
+        kwargs = {"connectionMethod": WebRTCConnectionMethod.LocalSTA}
     if serial and "serialNumber" in init_params:
         kwargs["serialNumber"] = serial
-    if ip:
+    if mode == "local" and ip:
         kwargs["ip"] = ip
-    if aes_key and "aes_128_key" in init_params:
+    if mode == "local" and aes_key and "aes_128_key" in init_params:
         kwargs["aes_128_key"] = aes_key
 
     conn = UnitreeWebRTCConnection(**kwargs)
@@ -493,7 +603,9 @@ async def _do_connect(
         await conn.connect()
     except Exception as exc:
         await _safe_disconnect_conn(conn)
-        raise _classify_connect_error(exc, aes_key_set=bool(aes_key)) from exc
+        raise _classify_connect_error(
+            exc, aes_key_set=bool(aes_key), remote=mode == "remote"
+        ) from exc
 
     try:
         # Media relay / gateway need track consumers; pure control removes them.
@@ -541,13 +653,27 @@ async def _do_connect(
         await conn.datachannel.disableTrafficSaving(True)
         conn.datachannel.set_decoder(decoder_type="native")
 
-        target = f"serial={serial}" if serial and not ip else f"ip={ip}"
+        lidar_requested = (
+            settings.unitree_lidar_stream
+            or settings.navigation_backend == "direct_go2"
+        )
+        lidar_switch_topic = RTC_TOPIC.get("ULIDAR_SWITCH")
+        if lidar_requested and lidar_switch_topic:
+            # Unitree's WebRTC bridge does not emit voxel_map_compressed until
+            # this sensor-stream switch is explicitly enabled.
+            conn.datachannel.pub_sub.publish_without_callback(
+                lidar_switch_topic,
+                "on",
+            )
+            logger.info("Go2 built-in LiDAR stream requested (%s)", lidar_switch_topic)
+
         conn_info = {
-            "ip": ip,
+            "mode": mode,
+            "ip": ip if mode == "local" else None,
             "serial": serial,
-            "aes_key_set": bool(aes_key),
-            "target": target,
-            "ip_is_default": ip_is_default,
+            "aes_key_set": bool(aes_key) if mode == "local" else False,
+            "target": _connection_target(settings),
+            "ip_is_default": ip_is_default if mode == "local" else False,
         }
 
         # Check current motion mode
@@ -603,6 +729,9 @@ class UnitreeWebRTCTransport(UnitreeTransport):
         self._motion_mode = settings.unitree_motion_mode or "normal"
         self._last_sport_state: dict[str, Any] | None = None
         self._last_low_state: dict[str, Any] | None = None
+        self._last_lidar = None
+        self._last_lidar_sensor_stamp: float | None = None
+        self._last_robot_odom: dict[str, Any] | None = None
         self._state_lock = threading.Lock()
         self._bg_loop: asyncio.AbstractEventLoop | None = None
         self._bg_thread: threading.Thread | None = None
@@ -638,6 +767,19 @@ class UnitreeWebRTCTransport(UnitreeTransport):
                 last_state_update=self._last_sport_state_mono,
                 sport_state_count=self._health.sport_state_count,
                 low_state_count=self._health.low_state_count,
+                lidar_compressed_message_count=(
+                    self._health.lidar_compressed_message_count
+                ),
+                lidar_uncompressed_message_count=(
+                    self._health.lidar_uncompressed_message_count
+                ),
+                lidar_state_count=self._health.lidar_state_count,
+                last_lidar_state=self._health.last_lidar_state,
+                lidar_frame_count=self._health.lidar_frame_count,
+                last_lidar_update=self._health.last_lidar_update,
+                lidar_timestamp_repair_count=self._health.lidar_timestamp_repair_count,
+                odom_frame_count=self._health.odom_frame_count,
+                last_odom_update=self._health.last_odom_update,
                 bridge_call_timeouts=self._health.bridge_call_timeouts,
             )
         return h
@@ -659,6 +801,20 @@ class UnitreeWebRTCTransport(UnitreeTransport):
         if self._last_sport_state_mono <= 0.0:
             return float("inf")
         return time.monotonic() - self._last_sport_state_mono
+
+    def lidar_age_seconds(self) -> float:
+        """Seconds since the last valid built-in LiDAR frame."""
+        updated = self._health.last_lidar_update
+        return float("inf") if updated <= 0.0 else time.monotonic() - updated
+
+    def odometry_age_seconds(self) -> float:
+        updated = self._health.last_odom_update
+        return self.state_age_seconds() if updated <= 0.0 else time.monotonic() - updated
+
+    def read_lidar_snapshot(self):
+        """Return the latest immutable built-in LiDAR frame, if available."""
+        with self._state_lock:
+            return self._last_lidar
 
     @property
     def is_connected(self) -> bool:
@@ -688,8 +844,8 @@ class UnitreeWebRTCTransport(UnitreeTransport):
 
         _install_benign_noise_filter()
 
-        ip, serial, ip_is_default = _resolve_connect_target(self._settings)
-        target = f"serial={serial}" if serial and not ip else f"ip={ip}"
+        mode = _resolve_connection_mode(self._settings)
+        target = _connection_target(self._settings)
 
         # --- Smart retry loop ---
         slot_retry_deadline = 0.0
@@ -702,9 +858,9 @@ class UnitreeWebRTCTransport(UnitreeTransport):
             aes_set = bool(_aes_key_from_env())
 
             logger.info(
-                "Connecting to Go2 via WebRTC (%s attempt=%d, aes_key=%s)...",
-                target, attempt,
-                "set" if aes_set else "none",
+                "Connecting to Go2 via WebRTC (%s, mode=%s, attempt=%d, aes_key=%s)...",
+                target, mode, attempt,
+                "n/a" if mode == "remote" else ("set" if aes_set else "none"),
             )
 
             try:
@@ -818,6 +974,34 @@ class UnitreeWebRTCTransport(UnitreeTransport):
                         RTC_TOPIC["LOW_STATE"],
                         self._on_low_state,
                     )
+                    lidar_topic = RTC_TOPIC.get("ULIDAR_ARRAY")
+                    if lidar_topic:
+                        conn.datachannel.pub_sub.subscribe(
+                            lidar_topic,
+                            self._on_lidar,
+                        )
+                    raw_lidar_topic = RTC_TOPIC.get("ULIDAR")
+                    if (
+                        self._settings.unitree_lidar_allow_uncompressed
+                        and raw_lidar_topic
+                        and raw_lidar_topic != lidar_topic
+                    ):
+                        conn.datachannel.pub_sub.subscribe(
+                            raw_lidar_topic,
+                            self._on_uncompressed_lidar,
+                        )
+                    lidar_state_topic = RTC_TOPIC.get("ULIDAR_STATE")
+                    if lidar_state_topic:
+                        conn.datachannel.pub_sub.subscribe(
+                            lidar_state_topic,
+                            self._on_lidar_state,
+                        )
+                    odom_topic = RTC_TOPIC.get("ROBOTODOM")
+                    if odom_topic:
+                        conn.datachannel.pub_sub.subscribe(
+                            odom_topic,
+                            self._on_robot_odom,
+                        )
 
                     self._connected = True
                     ready_event.set()
@@ -852,14 +1036,18 @@ class UnitreeWebRTCTransport(UnitreeTransport):
             self._connected = False
             raise SlotOccupiedError(
                 f"WebRTC connection timed out after {timeout:.0f}s ({target}). "
-                f"Check: robot powered on, same network, correct IP/serial, "
-                f"UNITREE_AES_128_KEY, and no other WebRTC client (Unitree app)."
+                f"Check: robot powered on, connection settings/serial, and no other "
+                f"WebRTC client (Unitree app)."
             )
 
         if connection_error:
             self._connected = False
             err = connection_error[0]
-            raise _classify_connect_error(err, aes_key_set=bool(_aes_key_from_env())) from err
+            raise _classify_connect_error(
+                err,
+                aes_key_set=bool(_aes_key_from_env()),
+                remote=_resolve_connection_mode(self._settings) == "remote",
+            ) from err
 
     async def _cleanup_failed_attempt(self) -> None:
         """Stop the background loop from a failed connect attempt.
@@ -932,7 +1120,11 @@ class UnitreeWebRTCTransport(UnitreeTransport):
         self._transport_shutdown = True
         self._set_conn_state(ConnectionState.DISCONNECTING)
 
-        if self._connected:
+        # A dry-run/read-only session must not publish zero joystick frames or
+        # StopMove during teardown. Live sessions retain the defensive halt.
+        if self._connected and (
+            not self._settings.unitree_dry_run or not self._drive_idle.is_set()
+        ):
             try:
                 await self._halt_motion(MotionEndReason.DISCONNECT, send_stopmove=True)
             except Exception as exc:
@@ -953,6 +1145,9 @@ class UnitreeWebRTCTransport(UnitreeTransport):
                 logger.warning("WebRTC disconnect error: %s", exc)
         self._last_sport_state = None
         self._last_low_state = None
+        self._last_lidar = None
+        self._last_lidar_sensor_stamp = None
+        self._last_robot_odom = None
         self._set_conn_state(ConnectionState.DISCONNECTED)
         logger.info("UnitreeWebRTCTransport disconnected")
 
@@ -996,6 +1191,60 @@ class UnitreeWebRTCTransport(UnitreeTransport):
                     pass
             self._health.low_state_count += 1
 
+    def _on_lidar(self, msg: Any) -> None:
+        """Capture a decoded Go2 built-in LiDAR frame for read-only consumers."""
+        with self._state_lock:
+            self._health.lidar_compressed_message_count += 1
+        self._decode_lidar(msg)
+
+    def _on_uncompressed_lidar(self, msg: Any) -> None:
+        """Capture firmware variants that publish the non-compressed topic."""
+        with self._state_lock:
+            self._health.lidar_uncompressed_message_count += 1
+        self._decode_lidar(msg)
+
+    def _on_lidar_state(self, msg: Any) -> None:
+        """Record LiDAR service state independently from point-cloud delivery."""
+        with self._state_lock:
+            self._health.lidar_state_count += 1
+            self._health.last_lidar_state = msg
+
+    def _decode_lidar(self, msg: Any) -> None:
+        """Decode a frame received from either built-in LiDAR topic."""
+        from robot_brain.perception.pointcloud import pointcloud_from_unitree_webrtc
+
+        received = time.monotonic()
+        snapshot = pointcloud_from_unitree_webrtc(msg, received_monotonic=received)
+        if snapshot is None:
+            return
+        with self._state_lock:
+            stamp = snapshot.sensor_timestamp
+            if (
+                stamp is not None
+                and self._last_lidar_sensor_stamp is not None
+                and stamp <= self._last_lidar_sensor_stamp
+            ):
+                snapshot = replace(
+                    snapshot,
+                    sensor_timestamp=None,
+                    timestamp_valid=False,
+                )
+                self._health.lidar_timestamp_repair_count += 1
+            elif stamp is not None:
+                self._last_lidar_sensor_stamp = stamp
+            self._last_lidar = snapshot
+            self._health.last_lidar_update = received
+            self._health.lidar_frame_count += 1
+
+    def _on_robot_odom(self, msg: Any) -> None:
+        parsed = _parse_robot_odom(msg)
+        if parsed is None:
+            return
+        with self._state_lock:
+            self._last_robot_odom = parsed
+            self._health.last_odom_update = time.monotonic()
+            self._health.odom_frame_count += 1
+
     # --------------------------------------------------------------- state reading
     async def read_state(self) -> UnitreeState:
         if not self._connected:
@@ -1004,6 +1253,7 @@ class UnitreeWebRTCTransport(UnitreeTransport):
         with self._state_lock:
             sport = self._last_sport_state
             low = self._last_low_state
+            odom = self._last_robot_odom
 
         if sport is None:
             # State may take a moment to arrive after subscription
@@ -1014,6 +1264,7 @@ class UnitreeWebRTCTransport(UnitreeTransport):
                 with self._state_lock:
                     sport = self._last_sport_state
                     low = self._last_low_state
+                    odom = self._last_robot_odom
                 if sport is not None:
                     break
             if sport is None:
@@ -1022,7 +1273,7 @@ class UnitreeWebRTCTransport(UnitreeTransport):
                     "Check: robot powered on, same network, correct IP."
                 )
 
-        return self._map_state(sport, low)
+        return self._map_state(sport, low, odom)
 
     async def assert_drive_preconditions(self, settings: Settings) -> UnitreeState:
         """Verify connection, state freshness, posture and error code before drive."""
@@ -1470,7 +1721,12 @@ class UnitreeWebRTCTransport(UnitreeTransport):
         return await coro
 
     # --------------------------------------------------------------- state mapping
-    def _map_state(self, sport: dict[str, Any], low: dict[str, Any] | None) -> UnitreeState:
+    def _map_state(
+        self,
+        sport: dict[str, Any],
+        low: dict[str, Any] | None,
+        odom: dict[str, Any] | None = None,
+    ) -> UnitreeState:
         """Map WebRTC sport mode state dict to UnitreeState."""
         try:
             sport = _unwrap_topic_payload(sport)
@@ -1488,6 +1744,15 @@ class UnitreeWebRTCTransport(UnitreeTransport):
             imu = sport.get("imu_state", {})
             rpy = imu.get("rpy", [0, 0, 0]) if isinstance(imu, dict) else [0, 0, 0]
             heading = math.degrees(float(rpy[2])) if len(rpy) >= 3 else 0.0
+            pose_frame_id = "world"
+            pose_timestamp = None
+            pose_source = "sport_state"
+            if odom is not None:
+                position = odom["position"].model_copy(deep=True)
+                heading = float(odom["heading_degrees"])
+                pose_frame_id = str(odom["frame_id"])
+                pose_timestamp = odom["timestamp"]
+                pose_source = "unitree_robotodom"
 
             # Mode — Go2 SportModeState enum (not the older SDK passive/stand_up scale).
             mode = int(sport.get("mode", 0))
@@ -1525,6 +1790,9 @@ class UnitreeWebRTCTransport(UnitreeTransport):
                 velocity=(float(vel[0]), float(vel[1]), float(vel[2]) if len(vel) >= 3 else 0.0),
                 imu_rpy=(float(rpy[0]), float(rpy[1]), float(rpy[2]) if len(rpy) >= 3 else 0.0),
                 ultrasonic=ultrasonic,
+                pose_frame_id=pose_frame_id,
+                pose_timestamp=pose_timestamp,
+                pose_source=pose_source,
             )
         except Exception as exc:
             logger.warning("WebRTC state mapping error: %s", exc)

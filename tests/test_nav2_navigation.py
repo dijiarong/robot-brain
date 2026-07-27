@@ -5,6 +5,8 @@ import unittest
 
 from config.settings import Settings
 from robot_brain.navigation import (
+    AbsoluteNavigationGoal,
+    LocalizationStatus,
     NavigationPose,
     NavigationStatus,
     Nav2GoalSnapshot,
@@ -30,6 +32,11 @@ class FakeNav2Bridge:
 
     def get_pose(self, timeout_s: float) -> NavigationPose | None:
         return self.pose
+
+    def get_pose_in_frame(self, frame_id: str, timeout_s: float) -> NavigationPose | None:
+        if self.pose is None:
+            return None
+        return self.pose.model_copy(update={"frame_id": frame_id})
 
     def send_goal(self, pose: NavigationPose, *, timeout_s: float) -> Nav2GoalSubmission:
         self.sent_pose = pose
@@ -108,6 +115,31 @@ class Nav2NavigationClientTests(unittest.IsolatedAsyncioTestCase):
         bridge = FakeNav2Bridge()
         await Nav2NavigationClient(bridge).aclose()
         self.assertTrue(bridge.closed)
+
+    async def test_map_localization_and_absolute_goal_require_matching_identity(self):
+        bridge = FakeNav2Bridge()
+        client = Nav2NavigationClient(
+            bridge, map_id="office", map_version="v1", map_frame="map"
+        )
+        localization = await client.get_localization_state()
+        self.assertEqual(LocalizationStatus.LOCALIZED, localization.status)
+        self.assertTrue(localization.usable_for_persistent_memory)
+
+        handle = await client.set_absolute_goal(AbsoluteNavigationGoal(
+            pose=NavigationPose(x_m=4.0, y_m=5.0, frame_id="map"),
+            map_id="office",
+            map_version="v1",
+        ))
+        self.assertTrue(handle.accepted)
+        self.assertEqual("map", bridge.sent_pose.frame_id)  # type: ignore[union-attr]
+
+    async def test_absolute_goal_rejects_wrong_map(self):
+        bridge = FakeNav2Bridge()
+        client = Nav2NavigationClient(bridge, map_id="office", map_frame="map")
+        with self.assertRaisesRegex(Exception, "different map"):
+            await client.set_absolute_goal(AbsoluteNavigationGoal(
+                pose=NavigationPose(frame_id="map"), map_id="warehouse"
+            ))
 
 
 class Nav2RuntimeWiringTests(unittest.TestCase):

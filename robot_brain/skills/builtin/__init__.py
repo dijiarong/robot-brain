@@ -18,6 +18,7 @@ from .go2_catalog import (
 )
 from .navigation import (
     CancelNavigationSkill,
+    NavigateAbsoluteSkill,
     NavigateRelativeSkill,
     navigation_skills,
 )
@@ -30,6 +31,7 @@ __all__ = [
     "NudgeSkill",
     "CancelNavigationSkill",
     "NavigateRelativeSkill",
+    "NavigateAbsoluteSkill",
     "PatrolSkill",
     "RecognizeSkill",
     "ReportSkill",

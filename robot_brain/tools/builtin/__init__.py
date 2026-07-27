@@ -3,11 +3,12 @@ from __future__ import annotations
 
 from robot_brain.tools.base import Tool
 from robot_brain.tools.builtin.control import Go2DriveSegmentTool, StopMotionTool
-from robot_brain.tools.builtin.navigation import NavigationGetStateTool
+from robot_brain.tools.builtin.navigation import LocalizationGetStateTool, NavigationGetStateTool
 
 __all__ = [
     "Go2DriveSegmentTool",
     "NavigationGetStateTool",
+    "LocalizationGetStateTool",
     "StopMotionTool",
     "default_tools",
     "go2_tools",

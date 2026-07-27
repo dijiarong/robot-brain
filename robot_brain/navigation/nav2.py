@@ -11,6 +11,10 @@ from typing import Any, Protocol
 from uuid import uuid4
 
 from robot_brain.navigation.base import (
+    AbsoluteNavigationGoal,
+    LocalizationState,
+    LocalizationStatus,
+    MapIdentity,
     NavigationClient,
     NavigationGoalHandle,
     NavigationPose,
@@ -67,11 +71,18 @@ class Nav2NavigationClient(NavigationClient):
         server_timeout_s: float = 2.0,
         pose_timeout_s: float = 1.0,
         cancel_timeout_s: float = 2.0,
+        map_id: str = "",
+        map_version: str | None = None,
+        map_frame: str = "map",
     ) -> None:
         self._bridge = bridge
         self._server_timeout_s = server_timeout_s
         self._pose_timeout_s = pose_timeout_s
         self._cancel_timeout_s = cancel_timeout_s
+        self._map_identity = (
+            MapIdentity(map_id=map_id, version=map_version, frame_id=map_frame)
+            if map_id else None
+        )
         self._state = NavigationState(
             provider="nav2",
             ready=False,
@@ -79,6 +90,10 @@ class Nav2NavigationClient(NavigationClient):
             message="Nav2 has not been queried",
         )
         self._initial_distance_m: float | None = None
+
+    @property
+    def supports_absolute_goals(self) -> bool:
+        return self._map_identity is not None
 
     async def get_state(self) -> NavigationState:
         ready = await asyncio.to_thread(self._bridge.is_ready, self._server_timeout_s)
@@ -162,6 +177,76 @@ class Nav2NavigationClient(NavigationClient):
             message=self._state.message,
         )
 
+    async def get_localization_state(self) -> LocalizationState:
+        if not await asyncio.to_thread(self._bridge.is_ready, self._server_timeout_s):
+            return LocalizationState(
+                status=LocalizationStatus.LOST,
+                map_identity=self._map_identity,
+                message="Nav2 action server unavailable",
+            )
+        get_in_frame = getattr(self._bridge, "get_pose_in_frame", None)
+        map_pose = None
+        if callable(get_in_frame) and self._map_identity is not None:
+            map_pose = await asyncio.to_thread(
+                get_in_frame, self._map_identity.frame_id, self._pose_timeout_s
+            )
+        if self._map_identity is not None and map_pose is not None:
+            return LocalizationState(
+                status=LocalizationStatus.LOCALIZED,
+                map_identity=self._map_identity,
+                pose=map_pose,
+                confidence=1.0,
+                message="Nav2 map localization ready",
+            )
+        odom_pose = await asyncio.to_thread(self._bridge.get_pose, self._pose_timeout_s)
+        return LocalizationState(
+            status=LocalizationStatus.LOCAL if odom_pose is not None else LocalizationStatus.LOST,
+            map_identity=self._map_identity,
+            pose=odom_pose,
+            confidence=1.0 if odom_pose is not None else 0.0,
+            message=(
+                "map identity or map->base_link transform unavailable"
+                if odom_pose is not None
+                else "Nav2 odometry unavailable"
+            ),
+        )
+
+    async def set_absolute_goal(
+        self, goal: AbsoluteNavigationGoal
+    ) -> NavigationGoalHandle:
+        localization = await self.get_localization_state()
+        if not localization.usable_for_persistent_memory:
+            raise NavigationUnavailableError("Nav2 map localization is not ready")
+        identity = localization.map_identity
+        assert identity is not None
+        if goal.map_id != identity.map_id or (
+            goal.map_version is not None and goal.map_version != identity.version
+        ):
+            raise NavigationUnavailableError("absolute goal belongs to a different map")
+        if goal.pose.frame_id != identity.frame_id:
+            raise NavigationUnavailableError("absolute goal frame does not match map frame")
+        submission = await asyncio.to_thread(
+            self._bridge.send_goal, goal.pose, timeout_s=self._server_timeout_s
+        )
+        if not submission.accepted:
+            return NavigationGoalHandle(
+                goal_id=submission.goal_id, accepted=False,
+                message=submission.message or "Nav2 rejected absolute goal",
+            )
+        current = localization.pose
+        self._initial_distance_m = (
+            math.hypot(goal.pose.x_m - current.x_m, goal.pose.y_m - current.y_m)
+            if current is not None else None
+        )
+        self._state = NavigationState(
+            provider="nav2", ready=True, status=NavigationStatus.ACTIVE,
+            goal_id=submission.goal_id, pose=current, progress=0.0,
+            message=submission.message or "Nav2 absolute goal accepted",
+        )
+        return NavigationGoalHandle(
+            goal_id=submission.goal_id, accepted=True, message=self._state.message
+        )
+
     async def cancel(self, goal_id: str | None = None) -> NavigationState:
         active_id = self._state.goal_id
         if active_id is None or self._state.status != NavigationStatus.ACTIVE:
@@ -222,11 +307,13 @@ class RclpyNav2Bridge:
         odom_topic: str = "/odom",
         goal_frame: str = "odom",
         node_name: str = "robot_brain_nav2",
+        base_frame: str = "base_link",
     ) -> None:
         self._action_name = action_name
         self._odom_topic = odom_topic
         self._goal_frame = goal_frame
         self._node_name = node_name
+        self._base_frame = base_frame
         self._lock = threading.RLock()
         self._rclpy: Any | None = None
         self._node: Any | None = None
@@ -237,6 +324,8 @@ class RclpyNav2Bridge:
         self._result_futures: dict[str, Any] = {}
         self._feedback_distance: dict[str, float] = {}
         self._owns_rclpy = False
+        self._tf_buffer: Any | None = None
+        self._tf_listener: Any | None = None
 
     def is_ready(self, timeout_s: float) -> bool:
         with self._lock:
@@ -252,6 +341,29 @@ class RclpyNav2Bridge:
             while self._latest_pose is None and time.monotonic() < deadline:
                 self._rclpy.spin_once(self._node, timeout_sec=0.05)
             return self._latest_pose.model_copy(deep=True) if self._latest_pose else None
+
+    def get_pose_in_frame(self, frame_id: str, timeout_s: float) -> NavigationPose | None:
+        with self._lock:
+            if not self._ensure() or self._tf_buffer is None:
+                return None
+            deadline = time.monotonic() + timeout_s
+            while time.monotonic() < deadline:
+                try:
+                    transform = self._tf_buffer.lookup_transform(
+                        frame_id, self._base_frame, self._rclpy.time.Time()
+                    )
+                    t = transform.transform.translation
+                    q = transform.transform.rotation
+                    siny = 2.0 * (q.w * q.z + q.x * q.y)
+                    cosy = 1.0 - 2.0 * (q.y * q.y + q.z * q.z)
+                    return NavigationPose(
+                        x_m=float(t.x), y_m=float(t.y),
+                        yaw_degrees=math.degrees(math.atan2(siny, cosy)),
+                        frame_id=frame_id,
+                    )
+                except Exception:
+                    self._rclpy.spin_once(self._node, timeout_sec=0.05)
+            return None
 
     def send_goal(
         self,
@@ -351,6 +463,7 @@ class RclpyNav2Bridge:
             from nav2_msgs.action import NavigateToPose
             from nav_msgs.msg import Odometry
             from rclpy.action import ActionClient
+            from tf2_ros import Buffer, TransformListener
         except Exception:
             return False
         try:
@@ -361,6 +474,8 @@ class RclpyNav2Bridge:
             self._node = rclpy.create_node(self._node_name)
             self._navigate_type = NavigateToPose
             self._action_client = ActionClient(self._node, NavigateToPose, self._action_name)
+            self._tf_buffer = Buffer()
+            self._tf_listener = TransformListener(self._tf_buffer, self._node)
             self._node.create_subscription(Odometry, self._odom_topic, self._on_odom, 10)
             return True
         except Exception:
@@ -385,12 +500,16 @@ def create_nav2_navigation_client(settings: Any) -> Nav2NavigationClient:
         action_name=settings.nav2_action_name,
         odom_topic=settings.nav2_odom_topic,
         goal_frame=settings.nav2_goal_frame,
+        base_frame=settings.nav2_base_frame,
     )
     return Nav2NavigationClient(
         bridge,
         server_timeout_s=settings.nav2_server_timeout_s,
         pose_timeout_s=settings.nav2_pose_timeout_s,
         cancel_timeout_s=settings.nav2_cancel_timeout_s,
+        map_id=settings.nav2_map_id,
+        map_version=settings.nav2_map_version,
+        map_frame=settings.nav2_map_frame,
     )
 
 

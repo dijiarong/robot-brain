@@ -36,6 +36,9 @@ class UnitreeState(BaseModel):
     imu_rpy: tuple[float, float, float] = (0.0, 0.0, 0.0)
     # Ultrasonic distances in metres (front, left, right, rear) — Go2 LowState.
     ultrasonic: tuple[float, float, float, float] | None = None
+    pose_frame_id: str = "world"
+    pose_timestamp: float | None = None
+    pose_source: str = "sport_state"
 
 
 class UnitreeCommand(BaseModel):
@@ -68,6 +71,10 @@ class UnitreeTransport(ABC):
     def state_age_seconds(self) -> float:
         """Seconds since the last sport-state callback (inf if never received)."""
         return float("inf")
+
+    def odometry_age_seconds(self) -> float:
+        """Age of the navigation pose; defaults to general state freshness."""
+        return self.state_age_seconds()
 
 
 class FakeUnitreeTransport(UnitreeTransport):

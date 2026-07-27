@@ -576,7 +576,16 @@ async def main() -> None:
     if args.transport == "sdk":
         print(f"  Net iface:     {settings.unitree_net_iface or '(auto)'}")
     if args.transport == "webrtc":
-        print(f"  Robot IP:      {settings.unitree_robot_ip or '(default 192.168.123.161)'}")
+        connection_mode = settings.unitree_webrtc_connection_mode.lower()
+        if connection_mode == "remote" or (
+            connection_mode == "auto"
+            and not settings.unitree_robot_ip
+            and settings.unitree_cloud_username
+            and settings.unitree_cloud_password
+        ):
+            print(f"  Connection:    cloud remote ({settings.unitree_cloud_region})")
+        else:
+            print(f"  Robot IP:      {settings.unitree_robot_ip or '(default 192.168.123.161)'}")
         if settings.unitree_serial:
             print(f"  Serial:        {settings.unitree_serial}")
     print(f"  Dry-run:       {settings.unitree_dry_run}")
@@ -597,7 +606,7 @@ async def main() -> None:
                 print("[HINT] Wi-Fi direct to Go2 hotspot; set RDB_UNITREE_NET_IFACE to your Wi-Fi interface (e.g. en0).")
             else:
                 print("[HINT] WebRTC needs: pip install unitree-webrtc-connect")
-                print("[HINT] Set RDB_UNITREE_ROBOT_IP to robot LAN IP (Unitree app), or RDB_UNITREE_SERIAL for discovery.")
+                print("[HINT] LAN: set RDB_UNITREE_ROBOT_IP; cloud: set Remote mode, serial, account, password, and region.")
                 print("[HINT] Firmware >= 1.1.15 also needs UNITREE_AES_128_KEY.")
             print("[HINT] To run without real hardware: --transport fake")
         sys.exit(1)

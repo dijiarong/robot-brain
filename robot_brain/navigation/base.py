@@ -30,11 +30,52 @@ class NavigationPose(BaseModel):
     frame_id: str = "odom"
 
 
+class LocalizationStatus(StrEnum):
+    UNKNOWN = "unknown"
+    LOCAL = "local"
+    LOCALIZED = "localized"
+    LOST = "lost"
+    STALE = "stale"
+
+
+class MapIdentity(BaseModel):
+    map_id: str
+    version: str | None = None
+    frame_id: str = "map"
+    persistent: bool = True
+
+
+class LocalizationState(BaseModel):
+    status: LocalizationStatus = LocalizationStatus.UNKNOWN
+    map_identity: MapIdentity | None = None
+    pose: NavigationPose | None = None
+    confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    message: str = ""
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+    @property
+    def usable_for_persistent_memory(self) -> bool:
+        return (
+            self.status == LocalizationStatus.LOCALIZED
+            and self.map_identity is not None
+            and self.map_identity.persistent
+            and self.pose is not None
+            and self.pose.frame_id == self.map_identity.frame_id
+        )
+
+
 class RelativeNavigationGoal(BaseModel):
     forward_m: float = Field(default=0.0, ge=-1.0, le=1.0)
     left_m: float = Field(default=0.0, ge=-0.5, le=0.5)
     yaw_degrees: float = Field(default=0.0, ge=-90.0, le=90.0)
     max_duration_s: float = Field(default=12.0, ge=0.5, le=20.0)
+
+
+class AbsoluteNavigationGoal(BaseModel):
+    pose: NavigationPose
+    map_id: str
+    map_version: str | None = None
+    max_duration_s: float = Field(default=60.0, ge=0.5, le=600.0)
 
 
 class NavigationGoalHandle(BaseModel):
@@ -76,3 +117,15 @@ class NavigationClient(ABC):
 
     @abstractmethod
     async def cancel(self, goal_id: str | None = None) -> NavigationState: ...
+
+    @property
+    def supports_absolute_goals(self) -> bool:
+        return False
+
+    async def get_localization_state(self) -> LocalizationState:
+        return LocalizationState(message="localization state is not exposed by this provider")
+
+    async def set_absolute_goal(
+        self, goal: AbsoluteNavigationGoal
+    ) -> NavigationGoalHandle:
+        raise NavigationUnavailableError("absolute map goals are not supported by this provider")

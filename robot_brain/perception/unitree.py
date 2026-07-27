@@ -49,6 +49,8 @@ def _build_self_state(raw: UnitreeState, age: float) -> RobotSelfState:
                 x_m=raw.position.x,
                 y_m=raw.position.y,
                 yaw_deg=raw.heading_degrees,
+                frame_id=raw.pose_frame_id,
+                timestamp=raw.pose_timestamp,
             ),
             vx_mps=raw.velocity[0],
             vy_mps=raw.velocity[1] if len(raw.velocity) >= 2 else 0.0,

@@ -213,32 +213,81 @@ class AgentRuntime:
                 raise ValueError(f"unsupported perception backend: {settings.perception_backend}")
         passability, passability_frame_source = _build_passability(settings)
         spatial_skill_set = []
-        if passability is not None and passability_frame_source is not None:
-            from robot_brain.memory.spatial import SpatialMemoryStore
-            from robot_brain.skills.builtin.spatial_memory import FindObjectSkill, RememberRoomSkill
-            from robot_brain.vlm.object_recognition import ObjectRecognizer
-
-            spatial_store = SpatialMemoryStore(settings.memory_db_path)
-            recognizer = ObjectRecognizer(passability._client)
-            spatial_skill_set = [
-                RememberRoomSkill(spatial_store, passability_frame_source, recognizer),
-                FindObjectSkill(spatial_store, passability_frame_source, recognizer),
-            ]
         if navigation is None:
             if settings.navigation_backend == "nav2":
                 from robot_brain.navigation.nav2 import create_nav2_navigation_client
 
                 navigation = create_nav2_navigation_client(settings)
+            elif settings.navigation_backend == "direct_go2":
+                from robot_brain.actuation.unitree import UnitreeRobot
+                from robot_brain.navigation.direct_go2 import DirectGo2NavigationClient
+                from robot_brain.navigation.sensors import UnitreeNavigationSensorProvider
+
+                if not isinstance(robot, UnitreeRobot):
+                    raise ValueError("direct_go2 navigation requires a UnitreeRobot")
+                transport = robot.transport
+                if not all(
+                    hasattr(transport, name)
+                    for name in ("read_lidar_snapshot", "lidar_age_seconds")
+                ):
+                    raise ValueError(
+                        "direct_go2 navigation requires a transport with built-in LiDAR"
+                    )
+                sensors = UnitreeNavigationSensorProvider(
+                    transport,
+                    max_pose_age_s=settings.odom_max_age_seconds,
+                    max_pointcloud_age_s=settings.direct_nav_pointcloud_max_age_s,
+                    require_authoritative_odom=settings.direct_nav_require_robotodom,
+                )
+                navigation = DirectGo2NavigationClient(
+                    robot,
+                    sensors,
+                    segment_duration_s=settings.direct_nav_segment_duration_s,
+                    obstacle_stop_m=settings.direct_nav_obstacle_stop_m,
+                    obstacle_half_width_m=settings.direct_nav_obstacle_half_width_m,
+                    min_progress_m=settings.odom_progress_min_m,
+                    min_progress_yaw_deg=settings.odom_progress_min_yaw_deg,
+                    max_no_progress_segments=settings.direct_nav_no_progress_segments,
+                )
             elif settings.robot_backend == "mock" and settings.navigation_backend in {"auto", "fake"}:
                 navigation = FakeNavigationClient()
+
+        if (
+            navigation is not None
+            and passability is not None
+            and passability_frame_source is not None
+        ):
+            from robot_brain.memory.spatial import SpatialMemoryStore
+            from robot_brain.skills.builtin.spatial_memory import (
+                FindObjectSkill,
+                RememberRoomSkill,
+            )
+            from robot_brain.vlm.object_recognition import ObjectRecognizer
+
+            spatial_store = SpatialMemoryStore(settings.memory_db_path)
+            recognizer = ObjectRecognizer(passability._client)
+            spatial_skill_set = [
+                RememberRoomSkill(
+                    spatial_store, passability_frame_source, recognizer, navigation
+                ),
+                FindObjectSkill(
+                    spatial_store, passability_frame_source, recognizer, navigation
+                ),
+            ]
 
         navigation_tools = []
         navigation_skill_set = []
         if navigation is not None:
             from robot_brain.skills.builtin.navigation import navigation_skills
-            from robot_brain.tools.builtin.navigation import NavigationGetStateTool
+            from robot_brain.tools.builtin.navigation import (
+                LocalizationGetStateTool,
+                NavigationGetStateTool,
+            )
 
-            navigation_tools = [NavigationGetStateTool(navigation)]
+            navigation_tools = [
+                NavigationGetStateTool(navigation),
+                LocalizationGetStateTool(navigation),
+            ]
             navigation_skill_set = navigation_skills(navigation)
         if settings.robot_backend == "unitree":
             from robot_brain.skills.builtin.go2_catalog import go2_skills

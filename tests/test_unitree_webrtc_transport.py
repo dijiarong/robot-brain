@@ -21,10 +21,15 @@ from robot_brain.actuation.unitree_webrtc import (
     _SPORT_REQUEST_TOPIC,
     _WIRELESS_CONTROLLER_TOPIC,
     _ZERO_STICK,
+    _connection_target,
+    _do_connect,
     _looks_like_sport_state,
     _parse_sport_error_code,
+    _parse_robot_odom,
+    _resolve_connection_mode,
     UnitreeWebRTCTransport,
 )
+from robot_brain.perception.pointcloud import pointcloud_from_unitree_webrtc
 
 
 def make_settings(**kwargs) -> Settings:
@@ -78,10 +83,208 @@ class ConnectDisconnectTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(transport.is_connected)
 
     async def test_disconnect_clears_connection(self) -> None:
-        transport, _ = connected_transport()
+        transport, conn = connected_transport()
         await transport.connect()
         await transport.disconnect()
         self.assertFalse(transport.is_connected)
+        conn.datachannel.pub_sub.publish_request_new.assert_not_awaited()
+        conn.datachannel.pub_sub.publish_without_callback.assert_not_called()
+
+
+class CloudConnectionTests(unittest.IsolatedAsyncioTestCase):
+    def test_auto_selects_cloud_without_ip_when_credentials_are_complete(self) -> None:
+        settings = make_settings(
+            unitree_robot_ip="",
+            unitree_serial="B42D1234567890",
+            unitree_cloud_username="operator@example.com",
+            unitree_cloud_password="secret-value",
+        )
+        self.assertEqual("remote", _resolve_connection_mode(settings))
+        target = _connection_target(settings)
+        self.assertEqual("cloud serial=B42D1234567890, region=global", target)
+        self.assertNotIn("operator@example.com", target)
+        self.assertNotIn("secret-value", target)
+
+    def test_auto_prefers_explicit_lan_ip(self) -> None:
+        settings = make_settings(
+            unitree_robot_ip="10.0.0.12",
+            unitree_serial="B42D1234567890",
+            unitree_cloud_username="operator@example.com",
+            unitree_cloud_password="secret-value",
+        )
+        self.assertEqual("local", _resolve_connection_mode(settings))
+
+    async def test_remote_builds_cloud_connection_without_lan_probe(self) -> None:
+        class Method:
+            LocalSTA = "local"
+            Remote = "remote"
+
+        class FakeConnection:
+            created_kwargs: dict = {}
+
+            def __init__(
+                self,
+                connectionMethod,
+                serialNumber=None,
+                ip=None,
+                username=None,
+                password=None,
+                aes_128_key=None,
+                region="global",
+                device_type="Go2",
+            ) -> None:
+                type(self).created_kwargs = dict(
+                    connectionMethod=connectionMethod,
+                    serialNumber=serialNumber,
+                    ip=ip,
+                    username=username,
+                    password=password,
+                    aes_128_key=aes_128_key,
+                    region=region,
+                    device_type=device_type,
+                )
+                self.datachannel = MagicMock()
+                self.datachannel.disableTrafficSaving = AsyncMock()
+
+            async def connect(self) -> None:
+                return None
+
+        settings = make_settings(
+            unitree_webrtc_connection_mode="remote",
+            navigation_backend="direct_go2",
+            unitree_robot_ip="",
+            unitree_serial="B42D1234567890",
+            unitree_cloud_username="operator@example.com",
+            unitree_cloud_password="secret-value",
+            unitree_cloud_region="cn",
+        )
+        with (
+            patch(
+                "robot_brain.actuation.unitree_webrtc._import_webrtc",
+                return_value=(
+                    FakeConnection,
+                    Method,
+                    {"ULIDAR_SWITCH": "rt/utlidar/switch"},
+                ),
+            ),
+            patch(
+                "robot_brain.actuation.unitree_webrtc._robot_port_reachable"
+            ) as reachable,
+        ):
+            _, info = await _do_connect(settings)
+
+        reachable.assert_not_called()
+        self.assertEqual("remote", FakeConnection.created_kwargs["connectionMethod"])
+        self.assertEqual("B42D1234567890", FakeConnection.created_kwargs["serialNumber"])
+        self.assertEqual("operator@example.com", FakeConnection.created_kwargs["username"])
+        self.assertEqual("secret-value", FakeConnection.created_kwargs["password"])
+        self.assertEqual("cn", FakeConnection.created_kwargs["region"])
+        _.datachannel.pub_sub.publish_without_callback.assert_called_once_with(
+            "rt/utlidar/switch", "on"
+        )
+        self.assertNotIn("password", info)
+        self.assertNotIn("username", info)
+
+    async def test_remote_requires_serial_and_credentials(self) -> None:
+        settings = make_settings(
+            unitree_webrtc_connection_mode="remote",
+            unitree_robot_ip="",
+            unitree_serial="",
+        )
+        with patch(
+            "robot_brain.actuation.unitree_webrtc._import_webrtc",
+            return_value=(MagicMock(), MagicMock(), {}),
+        ):
+            with self.assertRaisesRegex(ValueError, "RDB_UNITREE_SERIAL"):
+                await _do_connect(settings)
+
+
+class BuiltinLidarTests(unittest.TestCase):
+    def test_parse_native_decoder_frame(self) -> None:
+        snapshot = pointcloud_from_unitree_webrtc(
+            {
+                "data": {
+                    "frame_id": "world",
+                    "stamp": 12.5,
+                    "origin": [1.0, 2.0, 0.5],
+                    "data": {"points": [[1, 2, 3], [4.5, 5.5, 6.5]]},
+                }
+            },
+            received_monotonic=20.0,
+        )
+
+        self.assertIsNotNone(snapshot)
+        self.assertEqual(2, snapshot.point_count)  # type: ignore[union-attr]
+        self.assertEqual("world", snapshot.frame_id)  # type: ignore[union-attr]
+        self.assertTrue(snapshot.timestamp_valid)  # type: ignore[union-attr]
+        self.assertEqual((1.0, 2.0, 0.5), snapshot.origin_xyz)  # type: ignore[union-attr]
+        self.assertEqual(3.0, snapshot.age_seconds(now_monotonic=23.0))  # type: ignore[union-attr]
+
+    def test_malformed_or_empty_frame_is_rejected(self) -> None:
+        self.assertIsNone(pointcloud_from_unitree_webrtc({"data": {"points": []}}))
+        self.assertIsNone(pointcloud_from_unitree_webrtc("bad"))
+
+    def test_transport_exposes_latest_frame_and_marks_stale_sensor_stamp(self) -> None:
+        transport, _ = connected_transport()
+        frame = {
+            "data": {
+                "frame_id": "world",
+                "stamp": 100.0,
+                "data": {"points": [[0.1, 0.2, 0.3]]},
+            }
+        }
+        transport._on_lidar(frame)
+        first = transport.read_lidar_snapshot()
+        transport._on_lidar(frame)
+        second = transport.read_lidar_snapshot()
+
+        self.assertTrue(first.timestamp_valid)
+        self.assertFalse(second.timestamp_valid)
+        self.assertIsNone(second.sensor_timestamp)
+        self.assertEqual(2, transport.health.lidar_frame_count)
+        self.assertEqual(1, transport.health.lidar_timestamp_repair_count)
+        self.assertLess(transport.lidar_age_seconds(), 1.0)
+
+
+class BuiltinOdometryTests(unittest.IsolatedAsyncioTestCase):
+    ODOM = {
+        "type": "msg",
+        "topic": "rt/utlidar/robot_pose",
+        "data": {
+            "header": {
+                "stamp": {"sec": 100, "nanosec": 500_000_000},
+                "frame_id": "odom",
+            },
+            "pose": {
+                "position": {"x": 1.5, "y": -2.0, "z": 0.3},
+                "orientation": {"x": 0.0, "y": 0.0, "z": 0.7071068, "w": 0.7071068},
+            },
+        },
+    }
+
+    def test_parser_extracts_pose_frame_timestamp_and_yaw(self) -> None:
+        parsed = _parse_robot_odom(self.ODOM)
+        self.assertIsNotNone(parsed)
+        self.assertEqual((1.5, -2.0), (parsed["position"].x, parsed["position"].y))  # type: ignore[index]
+        self.assertAlmostEqual(90.0, parsed["heading_degrees"], places=4)  # type: ignore[index]
+        self.assertEqual("odom", parsed["frame_id"])  # type: ignore[index]
+        self.assertEqual(100.5, parsed["timestamp"])  # type: ignore[index]
+
+    async def test_robotodom_overrides_sport_pose_and_has_independent_freshness(self) -> None:
+        transport, _ = connected_transport()
+        await transport.connect()
+        transport._on_robot_odom(self.ODOM)
+        state = await transport.read_state()
+
+        self.assertEqual((1.5, -2.0), (state.position.x, state.position.y))
+        self.assertAlmostEqual(90.0, state.heading_degrees, places=4)
+        self.assertEqual("odom", state.pose_frame_id)
+        self.assertEqual("unitree_robotodom", state.pose_source)
+        self.assertLess(transport.odometry_age_seconds(), 1.0)
+        self.assertEqual(1, transport.health.odom_frame_count)
+
+    def test_malformed_odometry_is_rejected(self) -> None:
+        self.assertIsNone(_parse_robot_odom({"data": {"pose": {}}}))
 
 
 class SendCommandPostureTests(unittest.IsolatedAsyncioTestCase):

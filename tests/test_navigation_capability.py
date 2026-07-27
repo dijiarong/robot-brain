@@ -8,6 +8,9 @@ from robot_brain.actuation.mock import MockRobot
 from robot_brain.core.world_state import WorldState
 from robot_brain.llm.base import ToolCall
 from robot_brain.navigation import (
+    AbsoluteNavigationGoal,
+    LocalizationStatus,
+    MapIdentity,
     FakeNavigationClient,
     NavigationPose,
     NavigationStatus,
@@ -17,6 +20,8 @@ from robot_brain.runtime.loop import AgentRuntime
 from robot_brain.skills.builtin.navigation import (
     CancelNavigationParams,
     CancelNavigationSkill,
+    NavigateAbsoluteParams,
+    NavigateAbsoluteSkill,
     NavigateRelativeParams,
     NavigateRelativeSkill,
 )
@@ -56,6 +61,28 @@ class FakeNavigationClientTests(unittest.IsolatedAsyncioTestCase):
         await client.get_state()
         state = await client.cancel(handle.goal_id)
         self.assertEqual(NavigationStatus.CANCELED, state.status)
+
+    async def test_persistent_map_absolute_goal_updates_pose(self):
+        identity = MapIdentity(map_id="office", version="v1", frame_id="map")
+        client = FakeNavigationClient(
+            pose=NavigationPose(frame_id="map"), map_identity=identity
+        )
+        localization = await client.get_localization_state()
+        self.assertEqual(LocalizationStatus.LOCALIZED, localization.status)
+        self.assertTrue(localization.usable_for_persistent_memory)
+
+        await client.set_absolute_goal(AbsoluteNavigationGoal(
+            pose=NavigationPose(x_m=2.0, y_m=3.0, yaw_degrees=45.0, frame_id="map"),
+            map_id="office",
+            map_version="v1",
+        ))
+        state = await client.get_state()
+        self.assertEqual((2.0, 3.0), (state.pose.x_m, state.pose.y_m))  # type: ignore[union-attr]
+
+    async def test_session_local_fake_is_not_persistent_memory_safe(self):
+        localization = await FakeNavigationClient().get_localization_state()
+        self.assertEqual(LocalizationStatus.LOCAL, localization.status)
+        self.assertFalse(localization.usable_for_persistent_memory)
 
 
 class NavigationSkillTests(unittest.IsolatedAsyncioTestCase):
@@ -114,6 +141,24 @@ class NavigationSkillTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result.success)
         self.assertEqual("canceled", result.data["stop_reason"])
 
+    async def test_absolute_skill_executes_only_on_persistent_map_provider(self):
+        identity = MapIdentity(map_id="office", version="v1", frame_id="map")
+        client = FakeNavigationClient(
+            pose=NavigationPose(frame_id="map"), map_identity=identity
+        )
+        skill = NavigateAbsoluteSkill(client, poll_interval_s=0.0)
+        result = await skill.execute(
+            NavigateAbsoluteParams(
+                pose=NavigationPose(x_m=1.0, y_m=2.0, frame_id="map"),
+                map_id="office",
+                map_version="v1",
+            ),
+            MockRobot(),
+            WorldState(),
+        )
+        self.assertTrue(result.success)
+        self.assertEqual("succeeded", result.data["stop_reason"])
+
 
 class NavigationToolTests(unittest.IsolatedAsyncioTestCase):
     async def test_get_state_is_read_only(self):
@@ -164,6 +209,17 @@ class NavigationRuntimeTests(unittest.TestCase):
         names = {tool["name"] for tool in runtime.context.skills.tools_for_backend("unitree")}
         self.assertIn("nav_go_relative", names)
         self.assertIn("nav_cancel", names)
+
+    def test_persistent_provider_exposes_absolute_navigation_skill(self):
+        provider = FakeNavigationClient(
+            pose=NavigationPose(frame_id="map"),
+            map_identity=MapIdentity(map_id="office", frame_id="map"),
+        )
+        runtime = AgentRuntime.create(
+            settings=Settings(robot_backend="mock", memory_db_path=":memory:"),
+            navigation=provider,
+        )
+        self.assertIsNotNone(runtime.context.skills.get("nav_go_to_pose"))
 
 
 class NavigationSafetyTests(unittest.TestCase):
