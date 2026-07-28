@@ -12,6 +12,43 @@
 - 让空间物品记忆通过 Navigation Provider 返回已记录位置；
 - 支持局域网 WebRTC 和宇树账号/密码/序列号的 4G Remote WebRTC。
 
+### 1.1 原始 `/goal`
+
+Goal ID：`019fa248-8281-7171-b5aa-64edd04a001f`
+
+原始目标全文：
+
+> 在 robot-brain 中实现基于可替换 Navigation Provider 的 Go2 空间物品记忆完整闭环：第一阶段利用 Go2 自带 LiDAR、里程计和现有 Navigation/Nav2 能力完成安全的局部导航、动态避障与真机验收；第二阶段增加 map 坐标绝对目标、定位/重定位状态和地图身份契约；第三阶段将房间、物品观察点和跨房间查找重构为地图/会话绑定的持久记忆，所有真机移动经导航 Provider 执行，并保留后续接入 Mid-360/Super-LIO 或其他 SLAM 后端的能力。
+
+Goal 记录目前仍为 `blocked`。最初的阻塞原因是缺少真机 IP，后来已经通过宇树 4G Remote 成功连上真机；当前真正的技术阻塞更新为：**本项目的 Remote 连接能收到 odom 和 lidar_state，但收不到点云，而 Ubuntu 上的 DimOS Remote 实测能显示点云。两边实现版本尚未完成逐行对齐。**
+
+### 1.2 Goal 分阶段状态
+
+| 阶段 | 原计划 | 当前状态 | 还缺什么 |
+|---|---|---|---|
+| 第一阶段 | Go2 自带 LiDAR + odom，局部导航、动态避障、真机验收 | 代码和自动测试完成；Remote 状态/odom 真机通过；点云和真实运动未通过 | 对齐 Ubuntu DimOS Remote 点云实现；随后做 10 cm 和障碍停止验收 |
+| 第二阶段 | map 绝对目标、定位/重定位状态、地图身份契约 | 接口、Fake、Nav2 和 session-local Go2 身份已实现 | 用真实 Nav2/SLAM 验证 map goal、重定位和持久 map identity |
+| 第三阶段 | 房间/物品观察点持久化、跨房间查找、所有移动走 Provider | 重构和离线闭环测试已完成 | 真机地图上录入房间/物品并完成跨 session 返回测试 |
+| 后续扩展 | Mid360/Super-LIO/其他 SLAM | 接口预留完成 | 尚未接入真实 Mid360/Super-LIO 数据和 launch 系统 |
+
+### 1.3 本轮实际改动范围
+
+主要新增或修改：
+
+- `robot_brain/navigation/base.py`：Provider 契约、绝对/相对目标、定位状态、地图身份；
+- `robot_brain/navigation/direct_go2.py`：Go2 短分段局部导航；
+- `robot_brain/navigation/sensors.py`：odom/点云新鲜度和坐标系安全边界；
+- `robot_brain/navigation/nav2.py`：Nav2 绝对目标、定位与地图身份；
+- `robot_brain/perception/pointcloud.py`：Unitree WebRTC 点云标准化；
+- `robot_brain/actuation/unitree_webrtc.py`：Remote 连接、ROBOTODOM、LiDAR、健康诊断、只读断开；
+- `robot_brain/memory/spatial.py`：地图/会话绑定的空间记忆数据；
+- `robot_brain/skills/builtin/spatial_memory.py`：房间/物品导航全部经 Provider；
+- `robot_brain/skills/builtin/navigation.py` 和 `robot_brain/tools/builtin/navigation.py`：导航技能/工具；
+- `robot_brain/runtime/loop.py`：按配置组装 Fake、Nav2 或 direct_go2；
+- `scripts/verify_direct_go2_navigation.py`：真机只读与小步运动验收；
+- `scripts/verify_spatial_memory_navigation.py`：空间记忆离线闭环验收；
+- 对应导航、传感器、空间记忆和 WebRTC 测试。
+
 ## 2. 已完成
 
 ### 2.1 导航抽象
@@ -88,6 +125,36 @@ dimos \
   --disable security-module
 ```
 
+对应的完整环境变量配置示例：
+
+```bash
+cd /path/to/topsun_dimos
+source .venv/bin/activate
+
+export UNITREE_USERNAME="<宇树账号>"
+export UNITREE_SERIAL="<设备序列号>"
+export UNITREE_REGION="cn"
+
+read -s "UNITREE_PASSWORD?请输入宇树账号密码: "
+echo
+export UNITREE_PASSWORD
+
+dimos \
+  --unitree-webrtc-method remote \
+  --unitree-username "$UNITREE_USERNAME" \
+  --unitree-password "$UNITREE_PASSWORD" \
+  --unitree-serial "$UNITREE_SERIAL" \
+  --unitree-region "$UNITREE_REGION" \
+  run unitree-go2-agentic-deepseek \
+  --disable security-module
+```
+
+测试完成后：
+
+```bash
+unset UNITREE_PASSWORD
+```
+
 但是当前 Mac 仓库的 `origin/jtlinux` 不包含上述 CLI 参数，仍显示 `LocalSTA + ip` 实现。这说明 Ubuntu 工作区可能存在未推送提交、不同 commit 或安装的 `dimos` 指向另一份源码。
 
 接手者需要先在 Ubuntu 采集：
@@ -125,6 +192,45 @@ python -m pip show unitree-webrtc-connect \
 5. LiDAR 订阅是在连接前登记还是连接后登记；
 6. Remote 是否使用不同点云话题或数据通道；
 7. `unitree-webrtc-connect` 的精确版本和本地补丁。
+
+### 3.1.1 当前准确卡点
+
+本项目 Remote 实机数据：
+
+```text
+WebRTC connection: connected
+Robot Connection Mode: 4G
+sport_state_count: 599
+low_state_count: 599
+odom_frame_count: 561
+lidar_state_count: 149
+lidar_compressed_message_count: 0
+lidar_uncompressed_message_count: 0
+lidar_frame_count: 0
+```
+
+雷达状态本身正常：
+
+```text
+software_version: 1.0.0.38
+error_state: 0
+cloud_frequency: 15.235347
+cloud_packet_loss_rate: 0
+cloud_size: 6878
+cloud_scan_num: 210
+```
+
+因此卡点不是雷达硬件、云连接、odom 或 decoder 抛错，而是点云消息没有进入本项目注册的两个回调。下一步不能继续修改点云解析器；必须先取得 Ubuntu 上实际工作的 DimOS Remote 源码和版本，比较连接及订阅时序。
+
+### 3.1.2 下一位开发者的第一组动作
+
+1. 在 Ubuntu 上保存 `git rev-parse HEAD`、`dimos.__file__` 和依赖版本。
+2. 找到实现 `--unitree-webrtc-method remote` 的文件。
+3. 复制该文件的 Remote 构造和 post-connect/subscribe 部分到安全的临时文本，删除凭据。
+4. 与 `robot_brain/actuation/unitree_webrtc.py` 的 `_do_connect()` 和 `_connect_once()` 对比。
+5. 优先复现实测相同的订阅顺序，不要先改 decoder。
+6. 重新运行第 6.3 节，直到 `lidar_compressed_message_count>0`。
+7. 点云只读成功后，才进入第 8 节真机运动验收。
 
 ### 3.2 尚未完成真机运动验收
 
@@ -207,6 +313,36 @@ export RDB_UNITREE_DRY_RUN=true
 export RDB_UNITREE_ENABLE_MOTION=false
 export RDB_UNITREE_VIDEO_RELAY=false
 export RDB_UNITREE_AUDIO_RELAY=false
+```
+
+上面配置加启动命令的完整单块版本如下，可直接复制后替换占位符：
+
+```bash
+cd /path/to/robot-brain
+source .venv/bin/activate
+
+export RDB_UNITREE_TRANSPORT=webrtc
+export RDB_UNITREE_WEBRTC_CONNECTION_MODE=remote
+export RDB_UNITREE_SERIAL="<设备序列号>"
+export RDB_UNITREE_CLOUD_USERNAME="<宇树账号>"
+export RDB_UNITREE_CLOUD_REGION="cn"
+export RDB_UNITREE_CLOUD_DEVICE_TYPE="Go2"
+export RDB_UNITREE_WEBRTC_CONNECT_TIMEOUT="60"
+export RDB_UNITREE_DRY_RUN=true
+export RDB_UNITREE_ENABLE_MOTION=false
+export RDB_UNITREE_VIDEO_RELAY=false
+export RDB_UNITREE_AUDIO_RELAY=false
+export RDB_UNITREE_LIDAR_STREAM=true
+export RDB_UNITREE_LIDAR_ALLOW_UNCOMPRESSED=false
+export RDB_NAVIGATION_BACKEND=direct_go2
+
+unset RDB_UNITREE_ROBOT_IP UNITREE_ROBOT_IP DIMOS_ROBOT_IP ROBOT_IP
+
+read -s "RDB_UNITREE_CLOUD_PASSWORD?请输入宇树账号密码: "
+echo
+export RDB_UNITREE_CLOUD_PASSWORD
+
+python scripts/verify_direct_go2_navigation.py --sensor-timeout-s 30
 ```
 
 ### 6.2 状态连接
@@ -368,4 +504,3 @@ python -m examples.run_service
 - dry-run 断开不会发送运动控制帧；live 断开仍会归零并发送 StopMove。
 - 点云、odom 或坐标系不可信时必须 fail closed。
 - `.tmp/` 是本地未跟踪目录，不属于本次提交。
-
