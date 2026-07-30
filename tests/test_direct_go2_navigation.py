@@ -43,6 +43,30 @@ class _StuckTransport(_LidarFakeTransport):
             super()._apply_command(command)
 
 
+class _LaggedOdomTransport(_LidarFakeTransport):
+    """Apply drive immediately, but expose odometry after a short settle."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._pending: UnitreeState | None = None
+
+    def _apply_command(self, command) -> None:
+        if command.action != "drive":
+            super()._apply_command(command)
+            self._pending = None
+            return
+        before = self._state.model_copy(deep=True)
+        super()._apply_command(command)
+        after = self._state.model_copy(deep=True)
+        self._state = before
+        self._pending = after
+
+    def publish_pending(self) -> None:
+        if self._pending is not None:
+            self._state = self._pending
+            self._pending = None
+
+
 class _AppearingObstacleTransport(_LidarFakeTransport):
     def __init__(self) -> None:
         super().__init__()
@@ -81,17 +105,76 @@ async def _terminal(client, timeout=2.0):
 
 class DirectGo2NavigationTests(unittest.IsolatedAsyncioTestCase):
     async def test_relative_translation_and_yaw_close_on_real_odom_delta(self) -> None:
-        client, _ = await _client(segment_duration_s=0.25)
+        client, _ = await _client(segment_duration_s=0.25, odom_settle_s=0.0)
         handle = await client.set_relative_goal(
-            RelativeNavigationGoal(forward_m=0.12, yaw_degrees=10.0)
+            RelativeNavigationGoal(forward_m=0.12, yaw_degrees=10.0, max_duration_s=5.0)
         )
-        state = await _terminal(client)
+        state = await _terminal(client, timeout=6.0)
 
         self.assertTrue(handle.accepted)
         self.assertEqual(NavigationStatus.SUCCEEDED, state.status)
         self.assertEqual(1.0, state.progress)
         self.assertGreater(state.pose.x_m, 0.10)  # type: ignore[union-attr]
         self.assertGreater(state.pose.yaw_degrees, 8.0)  # type: ignore[union-attr]
+
+    async def test_closed_loop_keeps_driving_until_odom_reaches_goal(self) -> None:
+        # Each drive only advances half the commanded distance; open-loop would
+        # stop early, closed-loop must keep going until odom reaches the goal.
+        class _HalfSpeedTransport(_LidarFakeTransport):
+            def _apply_command(self, command) -> None:
+                if command.action == "drive":
+                    params = dict(command.parameters)
+                    params["duration"] = float(params.get("duration", 0.0)) * 0.5
+                    command = command.model_copy(update={"parameters": params})
+                super()._apply_command(command)
+
+        client, robot = await _client(
+            _HalfSpeedTransport(),
+            segment_duration_s=0.2,
+            linear_speed_mps=0.2,
+            odom_settle_s=0.0,
+            reach_tolerance_m=0.015,
+        )
+        await client.set_relative_goal(
+            RelativeNavigationGoal(forward_m=0.10, max_duration_s=5.0)
+        )
+        state = await _terminal(client, timeout=6.0)
+        self.assertEqual(NavigationStatus.SUCCEEDED, state.status)
+        self.assertGreaterEqual(state.pose.x_m, 0.085)  # type: ignore[union-attr]
+        drives = [a for a in robot.action_history if a["action"] == "drive"]
+        self.assertGreaterEqual(len(drives), 2)
+
+    async def test_goal_times_out_if_odom_never_reaches_tolerance(self) -> None:
+        class _CappedTransport(_LidarFakeTransport):
+            def _apply_command(self, command) -> None:
+                if command.action == "drive":
+                    super()._apply_command(command)
+                    if self._state.position.x > 0.03:
+                        self._state.position = type(self._state.position)(
+                            x=0.03, y=self._state.position.y
+                        )
+                    return
+                super()._apply_command(command)
+
+        client, _ = await _client(
+            _CappedTransport(),
+            segment_duration_s=0.2,
+            linear_speed_mps=0.2,
+            odom_settle_s=0.0,
+            min_progress_m=0.001,
+            max_no_progress_segments=20,
+            reach_tolerance_m=0.015,
+        )
+        await client.set_relative_goal(
+            RelativeNavigationGoal(forward_m=0.10, max_duration_s=1.0)
+        )
+        state = await _terminal(client, timeout=3.0)
+        self.assertIn(
+            state.status,
+            {NavigationStatus.TIMED_OUT, NavigationStatus.NO_PROGRESS},
+        )
+        self.assertNotEqual(NavigationStatus.SUCCEEDED, state.status)
+        self.assertLess(state.pose.x_m, 0.05)  # type: ignore[union-attr]
 
     async def test_obstacle_in_requested_corridor_rejects_goal(self) -> None:
         transport = _LidarFakeTransport(points=((0.2, 0.0, 0.2),))
@@ -102,7 +185,7 @@ class DirectGo2NavigationTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_side_obstacle_does_not_block_forward_corridor(self) -> None:
         transport = _LidarFakeTransport(points=((0.2, 0.8, 0.2),))
-        client, _ = await _client(transport)
+        client, _ = await _client(transport, odom_settle_s=0.0)
         await client.set_relative_goal(RelativeNavigationGoal(forward_m=0.08))
         state = await _terminal(client)
         self.assertEqual(NavigationStatus.SUCCEEDED, state.status)
@@ -112,16 +195,45 @@ class DirectGo2NavigationTests(unittest.IsolatedAsyncioTestCase):
             _StuckTransport(),
             segment_duration_s=0.25,
             max_no_progress_segments=2,
+            odom_settle_s=0.0,
         )
         await client.set_relative_goal(RelativeNavigationGoal(forward_m=0.3))
-        state = await _terminal(client)
+        state = await _terminal(client, timeout=5.0)
 
         self.assertEqual(NavigationStatus.NO_PROGRESS, state.status)
         self.assertTrue(any(a["action"] == "stop" for a in robot.action_history))
 
+    async def test_lagged_odom_publishes_during_settle_window(self) -> None:
+        transport = _LaggedOdomTransport()
+        client, _ = await _client(
+            transport,
+            segment_duration_s=0.2,
+            linear_speed_mps=0.2,
+            min_progress_m=0.02,
+            max_no_progress_segments=2,
+            odom_settle_s=0.3,
+        )
+
+        async def release_lag() -> None:
+            await asyncio.sleep(0.05)
+            transport.publish_pending()
+
+        original_drive = client._robot.drive
+
+        async def drive_and_release(*args, **kwargs):
+            await original_drive(*args, **kwargs)
+            asyncio.create_task(release_lag())
+
+        client._robot.drive = drive_and_release  # type: ignore[method-assign]
+        await client.set_relative_goal(RelativeNavigationGoal(forward_m=0.08))
+        state = await _terminal(client, timeout=5.0)
+        self.assertEqual(NavigationStatus.SUCCEEDED, state.status)
+
     async def test_dynamic_obstacle_between_segments_stops_goal(self) -> None:
         transport = _AppearingObstacleTransport()
-        client, robot = await _client(transport, segment_duration_s=0.25)
+        client, robot = await _client(
+            transport, segment_duration_s=0.25, odom_settle_s=0.0
+        )
         await client.set_relative_goal(RelativeNavigationGoal(forward_m=0.3))
         state = await _terminal(client)
 
@@ -132,7 +244,7 @@ class DirectGo2NavigationTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(any(a["action"] == "stop" for a in robot.action_history))
 
     async def test_cancel_is_idempotent_and_stops_motion(self) -> None:
-        client, robot = await _client(segment_duration_s=0.05)
+        client, robot = await _client(segment_duration_s=0.05, odom_settle_s=0.0)
         handle = await client.set_relative_goal(RelativeNavigationGoal(forward_m=1.0))
         state = await client.cancel(handle.goal_id)
 

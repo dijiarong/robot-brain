@@ -1,6 +1,6 @@
 # Go2 导航与空间物品记忆：开发交接和实机测试
 
-更新时间：2026-07-27
+更新时间：2026-07-30
 
 ## 1. 目标
 
@@ -20,34 +20,179 @@ Goal ID：`019fa248-8281-7171-b5aa-64edd04a001f`
 
 > 在 robot-brain 中实现基于可替换 Navigation Provider 的 Go2 空间物品记忆完整闭环：第一阶段利用 Go2 自带 LiDAR、里程计和现有 Navigation/Nav2 能力完成安全的局部导航、动态避障与真机验收；第二阶段增加 map 坐标绝对目标、定位/重定位状态和地图身份契约；第三阶段将房间、物品观察点和跨房间查找重构为地图/会话绑定的持久记忆，所有真机移动经导航 Provider 执行，并保留后续接入 Mid-360/Super-LIO 或其他 SLAM 后端的能力。
 
-Goal 记录目前仍为 `blocked`。最初的阻塞原因是缺少真机 IP，后来已经通过宇树 4G Remote 成功连上真机；当前真正的技术阻塞更新为：**本项目的 Remote 连接能收到 odom 和 lidar_state，但收不到点云，而 Ubuntu 上的 DimOS Remote 实测能显示点云。两边实现版本尚未完成逐行对齐。**
+**2026-07-30 结论：** 第一阶段真机验收已收口（见 §1.4）。第二阶段主线以 **Go2 自带 L1 激光雷达为默认传感器**：WebRTC → ROS2 `/odom` `/scan` → Nav2 → `/cmd_vel`→Move 已真机前进。**Mid-360 / Super-LIO 仅为可选增强后端**，不是框架硬依赖。当前缺口：短距 absolute 尚未稳定 `succeeded`；定位仍是会话内 `map≡odom`，下一步用 L1 做 2D 建图 + AMCL 换真 `map→odom`。
 
 ### 1.2 Goal 分阶段状态
 
 | 阶段 | 原计划 | 当前状态 | 还缺什么 |
 |---|---|---|---|
-| 第一阶段 | Go2 自带 LiDAR + odom，局部导航、动态避障、真机验收 | 代码和自动测试完成；Remote 状态/odom 真机通过；点云和真实运动未通过 | 对齐 Ubuntu DimOS Remote 点云实现；随后做 10 cm 和障碍停止验收 |
-| 第二阶段 | map 绝对目标、定位/重定位状态、地图身份契约 | 接口、Fake、Nav2 和 session-local Go2 身份已实现 | 用真实 Nav2/SLAM 验证 map goal、重定位和持久 map identity |
-| 第三阶段 | 房间/物品观察点持久化、跨房间查找、所有移动走 Provider | 重构和离线闭环测试已完成 | 真机地图上录入房间/物品并完成跨 session 返回测试 |
-| 后续扩展 | Mid360/Super-LIO/其他 SLAM | 接口预留完成 | 尚未接入真实 Mid360/Super-LIO 数据和 launch 系统 |
+| 第一阶段 | Go2 自带 LiDAR + odom，局部导航、动态避障、真机验收 | **真机验收通过（2026-07-29）** | 无阻塞；精度/速度不作为本阶段硬指标 |
+| 第二阶段 | map 绝对目标、定位/重定位、地图身份 | Provider + L1→Nav2 动狗已通；短距 absolute `succeeded`；**L1 建图 + AMCL 只读 `localized`（2026-07-30）** | 同图上 live-absolute；重定位触发 API 仍缺 |
+| 第三阶段 | 房间/物品观察点持久化、跨房间查找 | 重构和离线闭环测试已完成 | 真机地图上录入房间/物品并完成跨 session 返回测试 |
+| 后续扩展（可选） | Mid-360 / Super-LIO / 其他 SLAM | 接口预留；**非必选** | 有外接雷达时再换更强定位后端，RB 契约不变 |
+
+### 1.4 第一阶段真机验收结论（2026-07-29）
+
+连接方式：宇树 **4G Remote WebRTC**（账号 / 序列号 / 密码环境变量）。
+
+| 验收项 | 结果 | 备注 |
+|---|---|---|
+| Remote 连接 / SportState / 电量 | 通过 | Data Channel Verification OK |
+| 权威 odom（`rt/utlidar/robot_pose`） | 通过 | `pose_source=unitree_robotodom` |
+| 压缩点云（`voxel_map_compressed`） | 通过 | 曾被坐标系门禁拦住，修复后 `ready=true` |
+| 传感器只读 `ok` / `obstacle_frame=base_link` | 通过 | |
+| ~10 cm 前进（真迈步） | 通过 | 有过超调；不继续抠精度 |
+| 原地旋转 ~10–15° | 通过 | |
+| 遇障停止（前方人/障碍） | 通过 | `error_code=obstacle`，停在人前约十几 cm，未撞 |
+| 取消 / Ctrl+C 急停 | 通过 | 须在**连续长推**中途打断才好观察；短段导航难看出 |
+
+本阶段**不宣称**厘米级到位精度或匀速美观步态；宣称的是：能连、能感知、能短距动、能避障停、能急停。
 
 ### 1.3 本轮实际改动范围
 
 主要新增或修改：
 
 - `robot_brain/navigation/base.py`：Provider 契约、绝对/相对目标、定位状态、地图身份；
-- `robot_brain/navigation/direct_go2.py`：Go2 短分段局部导航；
-- `robot_brain/navigation/sensors.py`：odom/点云新鲜度和坐标系安全边界；
+- `robot_brain/navigation/direct_go2.py`：Go2 短分段局部导航（累计进度、odom settle、段时长）；
+- `robot_brain/navigation/sensors.py`：odom/点云新鲜度；**odom 帧点云转 base_link**（忽略体素 AABB origin）；
 - `robot_brain/navigation/nav2.py`：Nav2 绝对目标、定位与地图身份；
 - `robot_brain/perception/pointcloud.py`：Unitree WebRTC 点云标准化；
-- `robot_brain/actuation/unitree_webrtc.py`：Remote 连接、ROBOTODOM、LiDAR、健康诊断、只读断开；
+- `robot_brain/actuation/unitree_webrtc.py`：Remote、ROBOTODOM、LiDAR；**Ctrl+C 时取消后台 drive future**；
 - `robot_brain/memory/spatial.py`：地图/会话绑定的空间记忆数据；
 - `robot_brain/skills/builtin/spatial_memory.py`：房间/物品导航全部经 Provider；
 - `robot_brain/skills/builtin/navigation.py` 和 `robot_brain/tools/builtin/navigation.py`：导航技能/工具；
 - `robot_brain/runtime/loop.py`：按配置组装 Fake、Nav2 或 direct_go2；
-- `scripts/verify_direct_go2_navigation.py`：真机只读与小步运动验收；
+- `scripts/verify_direct_go2_navigation.py`：只读 / live / `--gait-probe` / `--cancel-probe`；
 - `scripts/verify_spatial_memory_navigation.py`：空间记忆离线闭环验收；
 - 对应导航、传感器、空间记忆和 WebRTC 测试。
+
+### 1.5 第一阶段踩坑总结
+
+1. **安装 extra 选错**  
+   必须 `.[unitree-webrtc]`，不要用 `.[unitree]`（会拉 DDS/GitHub，网络差易整装失败）。国内可用 pip 镜像。
+
+2. **点云「收不到」→ 后来能收到**  
+   交接初判 Remote 点云计数为 0；2026-07 真机复测时压缩点云已通。若再现 0，再比 DimOS Remote 订阅时序；不要先改 decoder。
+
+3. **`untrusted_obstacle_frame`（frame=`odom`）**  
+   归一化原先只处理 `world`。真机 voxel 是 `odom` 帧 → 需转到 `base_link`。
+
+4. **体素 `origin` 不是机器人位姿**  
+   真机常见 `origin≈(-3.225,-3.225,…)` 为体素格角点。若拿它和 `robot_pose` 比会误拦。**`odom` 帧一律用当前位姿做转换，忽略 AABB origin。**
+
+5. **设备时间戳不可靠**  
+   `sensor_timestamp_valid=false`、大量 `lidar_timestamp_repair_count` 属常见现象；靠本地修补，不单独阻塞。
+
+6. **站桩前倾不迈步 / `no_progress`**  
+   短段 + 零速打断步态；`sport_mode` 遥测常为 0 不可靠。有效做法：备步 `stand_up → balance_stand → free_walk → enable_omni_teleop`，`Move(1008)`，`vx≈0.35`，段时长拉长，累计进度 + odom settle。
+
+7. **`SpeedLevel=2` 被拒**  
+   本机路径上 `SpeedLevel=1` 可用；`=2` 曾返回 `-1`。
+
+8. **Ctrl+C 看不出急停**  
+   短段导航缝隙里打断观感差。根因之一：取消主协程时 **WebRTC 后台 `run_coroutine_threadsafe` 的 velocity stream 仍在推**。已改为 `wrap_future` + cancel 时 `fut.cancel()` 并 bump `motion_gen`。验收用 `--cancel-probe` 连续长推再中途 stop。
+
+9. **避障是机载 LiDAR 走廊，不是视觉/全局规划**  
+   前方约停障距离 / 半宽 / 高度带在 `direct_go2` 配置；人挡在前方可触发 `obstacle`。
+
+### 1.6 第一阶段有效运行命令（备忘）
+
+工作目录与 venv：
+
+```bash
+cd /home/dijia/project/Robot-Brain
+source .venv/bin/activate
+# 若尚未安装：
+# python -m pip install -e ".[unitree-webrtc]"
+```
+
+Remote 凭据（密码勿入库）：
+
+```bash
+export RDB_UNITREE_TRANSPORT=webrtc
+export RDB_UNITREE_WEBRTC_CONNECTION_MODE=remote
+export RDB_UNITREE_SERIAL="<设备序列号>"
+export RDB_UNITREE_CLOUD_USERNAME="<宇树账号>"
+export RDB_UNITREE_CLOUD_REGION="cn"
+export RDB_UNITREE_CLOUD_DEVICE_TYPE="Go2"
+export RDB_UNITREE_WEBRTC_CONNECT_TIMEOUT="60"
+export RDB_UNITREE_CLOUD_PASSWORD  # 交互或自行 export，勿提交
+
+export RDB_NAVIGATION_BACKEND=direct_go2
+export RDB_UNITREE_LIDAR_STREAM=true
+```
+
+只读传感器：
+
+```bash
+export RDB_UNITREE_DRY_RUN=true
+export RDB_UNITREE_ENABLE_MOTION=false
+python scripts/verify_direct_go2_navigation.py --sensor-timeout-s 30
+```
+
+期望：`ok=true`，`ready=true`，`obstacle_frame=base_link`，点云 `*_to_base`。
+
+Live 运动公共开关（测完立刻改回 dry-run）：
+
+```bash
+export RDB_UNITREE_DRY_RUN=false
+export RDB_UNITREE_ENABLE_MOTION=true
+export RDB_UNITREE_WEBRTC_DRIVE_VIA_MOVE=true
+export RDB_UNITREE_MAX_SPEED=0.35
+export RDB_UNITREE_MAX_DRIVE_DURATION=3.0
+export RDB_DIRECT_NAV_SEGMENT_DURATION_S=2.0
+```
+
+10 cm / 小目标前进：
+
+```bash
+python scripts/verify_direct_go2_navigation.py \
+  --live --confirm I_UNDERSTAND_DIRECT_GO2_NAV \
+  --forward-m 0.10 --timeout-s 15 --sensor-timeout-s 30
+```
+
+原地旋转：
+
+```bash
+python scripts/verify_direct_go2_navigation.py \
+  --live --confirm I_UNDERSTAND_DIRECT_GO2_NAV \
+  --forward-m 0 --yaw-degrees 15 --timeout-s 15 --sensor-timeout-s 30
+```
+
+遇障（前方站人，再发前进）：
+
+```bash
+python scripts/verify_direct_go2_navigation.py \
+  --live --confirm I_UNDERSTAND_DIRECT_GO2_NAV \
+  --forward-m 1.0 --timeout-s 20 --sensor-timeout-s 30
+```
+
+步态探测（连续前进，人眼看是否迈步）：
+
+```bash
+python scripts/verify_direct_go2_navigation.py \
+  --live --confirm I_UNDERSTAND_DIRECT_GO2_NAV \
+  --gait-probe --gait-probe-vx 0.35 --gait-probe-duration-s 3.0
+```
+
+急停探测（连续长推约 2.5 s 后自动 STOP；也可中途 Ctrl+C）：
+
+```bash
+export RDB_UNITREE_MAX_DRIVE_DURATION=8.0
+python scripts/verify_direct_go2_navigation.py \
+  --live --confirm I_UNDERSTAND_DIRECT_GO2_NAV \
+  --cancel-probe
+```
+
+测完恢复：
+
+```bash
+export RDB_UNITREE_DRY_RUN=true
+export RDB_UNITREE_ENABLE_MOTION=false
+unset RDB_UNITREE_CLOUD_PASSWORD
+```
+
+前置提醒：平整空旷；人可急停；退出 Unitree App 及其他 WebRTC 客户端。
 
 ## 2. 已完成
 
@@ -65,7 +210,7 @@ Goal 记录目前仍为 `blocked`。最初的阻塞原因是缺少真机 IP，�
 - 订阅 `rt/utlidar/voxel_map_compressed`，可选诊断未压缩点云。
 - 订阅 `rt/utlidar/lidar_state` 并输出独立健康计数。
 - 导航默认拒绝使用 `SportModeState.position` 替代权威里程计。
-- 点云必须新鲜且处于可信的机器人相对坐标系；`world` 点云只有原点与同时刻 odom 匹配时才转换到 `base_link`。
+- 点云必须新鲜且处于可信的机器人相对坐标系；`odom`/`world` 点云安全转换到 `base_link`（`odom` 忽略体素 AABB origin，改用 `robot_pose`）。
 
 ### 2.3 空间物品记忆
 
@@ -98,161 +243,151 @@ Goal 记录目前仍为 `blocked`。最初的阻塞原因是缺少真机 IP，�
 68 passed, 11 subtests passed
 ```
 
-实机 4G Remote 已验证：
+实机 4G Remote（2026-07-29 更新）：
 
 - 云端登录和 TURN/ICE 成功；
 - Data Channel Verification 成功；
-- 能读取 SportState、LowState、电量和 `mcf` 模式；
-- `robot_pose` 约 18 Hz；
-- `lidar_state` 约 5 Hz；
-- 雷达自身报告 `error_state=0`、点云频率约 15 Hz、丢包率 0；
-- 当前 `robot-brain` Remote 测试中压缩和未压缩点云消息计数仍为 0。
+- SportState / LowState / 电量可读；
+- `robot_pose` 与压缩点云均可收到；导航传感器 `ready=true`、`obstacle_frame=base_link`；
+- 第一阶段运动/避障/急停验收见 §1.4；有效命令见 §1.6。
 
 ## 3. 尚未完成
 
-### 3.1 4G Remote 点云差异尚未定位
+### 3.1 4G Remote 点云（历史卡点，已解除）
 
-Ubuntu 上的 DimOS 使用以下形式启动，并据用户实测能在 Runner 中显示点云：
+原文档记录 Remote 点云计数为 0、需对齐 DimOS。**2026-07 真机复测点云已通**；剩余问题是坐标系归一化（已修，见 §1.5）。若日后再次出现 `lidar_*_message_count=0`，再按下列对比 DimOS 订阅时序；否则不要回到改 decoder。
 
-```bash
-dimos \
-  --unitree-webrtc-method remote \
-  --unitree-username "$UNITREE_USERNAME" \
-  --unitree-password "$UNITREE_PASSWORD" \
-  --unitree-serial "$UNITREE_SERIAL" \
-  --unitree-region "$UNITREE_REGION" \
-  run unitree-go2-agentic-deepseek \
-  --disable security-module
-```
+### 3.2 第一阶段真机运动验收（已完成）
 
-对应的完整环境变量配置示例：
+§1.4 所列运动项已在真机通过。空间记忆「返回房间/物品」属第三阶段真机项，仍未做。
 
-```bash
-cd /path/to/topsun_dimos
-source .venv/bin/activate
+### 3.3 全局导航和跨重启重定位（第二阶段主线）
 
-export UNITREE_USERNAME="<宇树账号>"
-export UNITREE_SERIAL="<设备序列号>"
-export UNITREE_REGION="cn"
+`DirectGo2NavigationClient` 只提供 session-local 短距离导航，不是全局规划器。跨重启空间物品记忆需要 **真实 `map→odom`**，默认用狗自带雷达，不强制外接激光：
 
-read -s "UNITREE_PASSWORD?请输入宇树账号密码: "
-echo
-export UNITREE_PASSWORD
+1. **默认（推荐当前推进）**：Go2 L1 → `/scan` + odom → 2D 建图（如 `slam_toolbox`）→ 保存地图 → **AMCL** 重定位 → Nav2；
+2. **会话冒烟（已做）**：`map≡odom` 单位阵，只验动狗与 Provider 契约，**不能**当持久定位；
+3. **可选增强**：Mid-360 + Super-LIO / 其他 3D SLAM——输出同一套 TF/`navigate_to_pose` 即可接入，**不是框架特殊要求**。
 
-dimos \
-  --unitree-webrtc-method remote \
-  --unitree-username "$UNITREE_USERNAME" \
-  --unitree-password "$UNITREE_PASSWORD" \
-  --unitree-serial "$UNITREE_SERIAL" \
-  --unitree-region "$UNITREE_REGION" \
-  run unitree-go2-agentic-deepseek \
-  --disable security-module
-```
+Robot-Brain 只消费 Provider（位姿、绝对目标、`MapIdentity`）；定位后端可替换。
 
-测试完成后：
+第二阶段代码侧已有：`AbsoluteNavigationGoal`、`LocalizationState`、`MapIdentity`、`Nav2NavigationClient`。  
+真机进度（2026-07-30）：L1→Nav2→Move 已前进；仍缺稳定 `succeeded`、以及默认路径上的 L1 建图/AMCL；仓库尚无独立「重定位触发」API（仅能读状态）。
+
+### 3.4 第二阶段第一步（只读，2026-07-29 起）
+
+前置：本机或容器已 source Navigation（ROS2 Humble）工作区，Nav2 Action、`/odom`、`map→base_link` TF 可用。
 
 ```bash
-unset UNITREE_PASSWORD
+export RDB_NAVIGATION_BACKEND=nav2
+export RDB_NAV2_ACTION_NAME=/navigate_to_pose
+export RDB_NAV2_ODOM_TOPIC=/odom
+export RDB_NAV2_GOAL_FRAME=odom
+export RDB_NAV2_MAP_FRAME=map
+export RDB_NAV2_MAP_ID=<stable-map-id>    # 绝对目标必需；不设则 supports_absolute_goals=false
+export RDB_NAV2_MAP_VERSION=v1            # 可选
+
+# 默认只读：action + odom + localization + map identity
+python scripts/verify_nav2_provider.py
 ```
 
-但是当前 Mac 仓库的 `origin/jtlinux` 不包含上述 CLI 参数，仍显示 `LocalSTA + ip` 实现。这说明 Ubuntu 工作区可能存在未推送提交、不同 commit 或安装的 `dimos` 指向另一份源码。
+期望：`ok=true`，有 odom pose；localization `status=localized`（若 map TF 可用）；配置了 `MAP_ID` 时 identity 可用。  
+**先不要** `--live`；只读通过后再做短距相对/绝对目标。
 
-接手者需要先在 Ubuntu 采集：
+### 3.5 Go2 自带雷达 → ROS2 / Nav2（默认路径，2026-07-30）
+
+**默认用狗 L1，不需要 Mid-360。** WebRTC 桥发 `/odom` `/scan` `/points` + TF；可选 `--enable-cmd-vel` 把 Nav2 速度回灌 Go2 Move。
 
 ```bash
-cd /path/to/topsun_dimos
-source .venv/bin/activate
-
-git branch --show-current
-git rev-parse HEAD
-git status --short
-which dimos
-
-python - <<'PY'
-import dimos
-print(dimos.__file__)
-PY
-
-rg -n \
-  'unitree-webrtc-method|unitree_webrtc_method|unitree_username|unitree_serial|WebRTCConnectionMethod.Remote' \
-  dimos
-
-python -m pip show unitree-webrtc-connect \
-  | grep -E 'Name|Version|Location'
+# 终端 A：WebRTC 桥 + Nav2（运动关闭）
+source /opt/ros/jazzy/setup.bash
+source /home/dijia/project/Robot-Brain/.venv-jazzy/bin/activate
+# 先 export Remote 凭据 + RDB_UNITREE_LIDAR_STREAM=true ...
+bash /home/dijia/project/Navigation/scripts/phase2_go2_lidar_nav2.sh
 ```
 
-禁止把真实密码、AES key 或 token 写入输出、issue、提交和聊天记录。
-
-拿到 Ubuntu 的实际连接源码后，重点比较：
-
-1. `UnitreeWebRTCConnection` 构造参数；
-2. `disableTrafficSaving(True)` 的调用时机和返回值；
-3. decoder 类型；
-4. `rt/utlidar/switch` 的发布时机；
-5. LiDAR 订阅是在连接前登记还是连接后登记；
-6. Remote 是否使用不同点云话题或数据通道；
-7. `unitree-webrtc-connect` 的精确版本和本地补丁。
-
-### 3.1.1 当前准确卡点
-
-本项目 Remote 实机数据：
-
-```text
-WebRTC connection: connected
-Robot Connection Mode: 4G
-sport_state_count: 599
-low_state_count: 599
-odom_frame_count: 561
-lidar_state_count: 149
-lidar_compressed_message_count: 0
-lidar_uncompressed_message_count: 0
-lidar_frame_count: 0
+```bash
+# 终端 B
+source /opt/ros/jazzy/setup.bash
+source /home/dijia/project/Robot-Brain/.venv-jazzy/bin/activate
+cd /home/dijia/project/Robot-Brain
+ros2 topic hz /scan
+export RDB_NAVIGATION_BACKEND=nav2
+export RDB_NAV2_MAP_ID=lab-floor1
+export RDB_NAV2_MAP_VERSION=v1
+python scripts/verify_nav2_provider.py
 ```
 
-雷达状态本身正常：
+桥接脚本：`scripts/go2_webrtc_ros_bridge.py`（`/odom`、`/scan`、`/points`、TF）。默认不动狗。
 
-```text
-software_version: 1.0.0.38
-error_state: 0
-cloud_frequency: 15.235347
-cloud_packet_loss_rate: 0
-cloud_size: 6878
-cloud_scan_num: 210
+要把 Nav2 `/cmd_vel` 发回狗（空旷场地）：
+
+```bash
+# 终端 A（会动狗）
+export RDB_UNITREE_ENABLE_MOTION=true
+export RDB_UNITREE_WEBRTC_DRIVE_VIA_MOVE=true
+export RDB_UNITREE_MAX_SPEED=0.35
+ENABLE_CMD_VEL=1 bash /home/dijia/project/Navigation/scripts/phase2_go2_lidar_nav2.sh
 ```
 
-因此卡点不是雷达硬件、云连接、odom 或 decoder 抛错，而是点云消息没有进入本项目注册的两个回调。下一步不能继续修改点云解析器；必须先取得 Ubuntu 上实际工作的 DimOS Remote 源码和版本，比较连接及订阅时序。
+```bash
+# 终端 B（机体前向偏移；禁倒车已在桥内默认开启）
+python scripts/verify_nav2_provider.py --live-absolute --absolute-dx-m 0.3 --timeout-s 60
+```
 
-### 3.1.2 下一位开发者的第一组动作
+期望：狗迈步前进；理想 `succeeded`。若只前进中途 abort，先查代价地图 / `out of map bounds`，再调大 local costmap。
 
-1. 在 Ubuntu 上保存 `git rev-parse HEAD`、`dimos.__file__` 和依赖版本。
-2. 找到实现 `--unitree-webrtc-method remote` 的文件。
-3. 复制该文件的 Remote 构造和 post-connect/subscribe 部分到安全的临时文本，删除凭据。
-4. 与 `robot_brain/actuation/unitree_webrtc.py` 的 `_do_connect()` 和 `_connect_once()` 对比。
-5. 优先复现实测相同的订阅顺序，不要先改 decoder。
-6. 重新运行第 6.3 节，直到 `lidar_compressed_message_count>0`。
-7. 点云只读成功后，才进入第 8 节真机运动验收。
+**2026-07-30 真机收口：** `--live-absolute --absolute-dx-m 0.3` 已出现 `ok=true` / `status=succeeded`（机体前向目标 + 禁倒车 + L1→Nav2→Move）。位移相对目标仍偏短（progress≈0.37），但 Provider 链路与动狗验收通过。下一步：L1 2D 建图 + AMCL，换掉会话内 `map≡odom`。
 
-### 3.2 尚未完成真机运动验收
+**定位下一步（仍用 L1，无 Mid-360）：** 用同一 `/scan`+`/odom` 跑 2D 建图并保存，再 AMCL 加载该图，使 `map→odom` 由定位维护；RB 侧 `map_id` 绑这张图。Mid-360 仅作日后可选换后端。
 
-以下功能只有自动测试，尚未在真机完成：
+### 3.6 L1 建图 + AMCL（默认定位路径，2026-07-30）
 
-- 10 cm 前进局部目标；
-- 原地小角度旋转；
-- 运动中出现障碍后的停止；
-- 里程计无进展后的停止；
-- 断连、取消和进程退出时的停止；
-- 通过空间记忆返回房间或物品位置。
+先 **Ctrl+C 停掉** 旧的 `phase2_go2_lidar_nav2.sh`（它会发假 `map≡odom`，和 SLAM/AMCL 冲突）。
 
-点云未通过只读验收前，不得执行这些真机运动测试。
+**A. 建图（慢速绕房间一圈，尽量闭环）**
 
-### 3.3 全局导航和跨重启重定位
+```bash
+# 终端 A
+export RDB_UNITREE_ENABLE_MOTION=true
+# …其余 Remote 凭据…
+bash /home/dijia/project/Navigation/scripts/phase2_go2_lidar_mapping.sh
+```
 
-`DirectGo2NavigationClient` 只提供 session-local 短距离导航，不是全局规划器。实现跨重启空间物品记忆仍需要以下之一：
+```bash
+# 终端 B：键盘遥控（桥会抬升到可迈步速度）
+source /opt/ros/jazzy/setup.bash
+ros2 run teleop_twist_keyboard teleop_twist_keyboard
+```
 
-- `Navigation` 项目的 Nav2/SLAM；
-- Mid360 + Fast-LIO/SLAM；
-- Go2/拓展坞端运行建图、重定位和导航服务，Mac/云端只发送目标；
-- 移植 DimOS 的预地图、ICP 重定位、VoxelGrid/Costmap 链路。
+绕完后存图：
+
+```bash
+source /opt/ros/jazzy/setup.bash
+ros2 run nav2_map_server map_saver_cli \
+  -f /home/dijia/project/Navigation/navigation/src/bringup/maps/lab_floor1
+```
+
+**B. 定位 + Nav2（用刚存的图）**
+
+```bash
+# 终端 A（可先只读；动狗再加 ENABLE_CMD_VEL=1）
+MAP_YAML=/home/dijia/project/Navigation/navigation/src/bringup/maps/lab_floor1.yaml \
+  bash /home/dijia/project/Navigation/scripts/phase2_go2_lidar_localize.sh
+```
+
+在建图起点附近发一次 `/initialpose`（脚本会打印示例），然后：
+
+```bash
+# 终端 B
+export RDB_NAVIGATION_BACKEND=nav2 RDB_NAV2_MAP_ID=lab-floor1 RDB_NAV2_MAP_VERSION=v1
+python scripts/verify_nav2_provider.py
+# 确认 tf map→odom 由 AMCL 维护后再 --live-absolute
+```
+
+脚本：`phase2_go2_lidar_mapping.sh`、`phase2_go2_lidar_localize.sh`；桥用 `--no-publish-map-tf`。旧的 `phase2_go2_lidar_nav2.sh` 仍可用于会话内假定位冒烟。
+
+**2026-07-30 定位只读收口：** 已存 `lab_floor1` 图；`phase2_go2_lidar_localize.sh` + `/initialpose` 后 `verify_nav2_provider.py` 出现 `ok=true`、`localization.status=localized`、`usable_for_persistent_memory=true`（map 位姿与 odom 位姿可不同，说明 AMCL 在维护 `map→odom`）。下一步：同图上 `--live-absolute` 短距动狗；再进入第三阶段空间记忆真机。
 
 ## 4. 安装
 
@@ -427,6 +562,8 @@ export UNITREE_AES_128_KEY
 ```
 
 ## 8. 真机局部导航测试
+
+**有效真机参数与完整命令以 §1.6 为准**（含 Move、速度、gait/cancel probe）。下列为文档早期模板，首次小步仍可用，但若站桩不迈步请改用 §1.6。
 
 前置条件：
 

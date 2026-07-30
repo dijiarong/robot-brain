@@ -71,6 +71,39 @@ class NavigationSensorProviderTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("base_link", snapshot.pointcloud.frame_id)  # type: ignore[union-attr]
         self.assertIn("world_to_base", snapshot.pointcloud.source)  # type: ignore[union-attr]
 
+    async def test_odom_cloud_without_origin_uses_pose_as_origin(self) -> None:
+        # Points share the session-local robot_pose frame.
+        transport = _SensorTransport(frame_id="odom", origin_xyz=None)
+        await transport.connect()
+        snapshot = await UnitreeNavigationSensorProvider(transport).get_snapshot()
+
+        self.assertTrue(snapshot.ready)
+        self.assertEqual("base_link", snapshot.obstacle_frame)
+        self.assertEqual("base_link", snapshot.pointcloud.frame_id)  # type: ignore[union-attr]
+        self.assertIn("odom_to_base", snapshot.pointcloud.source)  # type: ignore[union-attr]
+        # Pose (1, 2) yaw=30°; cloud point (0.5, 0, 0.2) in odom -> body.
+        bx, by, bz = snapshot.pointcloud.points_xyz[0]  # type: ignore[union-attr]
+        self.assertAlmostEqual(-1.43301270189, bx, places=6)
+        self.assertAlmostEqual(-1.48205080757, by, places=6)
+        self.assertAlmostEqual(0.2, bz, places=6)
+
+    async def test_odom_cloud_ignores_voxel_aabb_origin(self) -> None:
+        # Real Go2 Remote reports voxel grid corner as origin (e.g. -3.225),
+        # which must not block odom->base_link conversion.
+        transport = _SensorTransport(
+            frame_id="odom", origin_xyz=(-3.225, -3.225, -0.575)
+        )
+        await transport.connect()
+        snapshot = await UnitreeNavigationSensorProvider(transport).get_snapshot()
+
+        self.assertTrue(snapshot.ready)
+        self.assertEqual("base_link", snapshot.obstacle_frame)
+        self.assertIn("odom_to_base", snapshot.pointcloud.source)  # type: ignore[union-attr]
+        bx, by, bz = snapshot.pointcloud.points_xyz[0]  # type: ignore[union-attr]
+        self.assertAlmostEqual(-1.43301270189, bx, places=6)
+        self.assertAlmostEqual(-1.48205080757, by, places=6)
+        self.assertAlmostEqual(0.2, bz, places=6)
+
     async def test_world_cloud_origin_mismatch_fails_closed(self) -> None:
         transport = _SensorTransport(frame_id="world", origin_xyz=(10.0, 10.0, 0.0))
         await transport.connect()

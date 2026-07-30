@@ -89,7 +89,18 @@ class Settings:
         default_factory=lambda: float(os.getenv("RDB_DIRECT_NAV_OBSTACLE_HALF_WIDTH_M", "0.28"))
     )
     direct_nav_no_progress_segments: int = field(
-        default_factory=lambda: int(os.getenv("RDB_DIRECT_NAV_NO_PROGRESS_SEGMENTS", "2"))
+        default_factory=lambda: int(os.getenv("RDB_DIRECT_NAV_NO_PROGRESS_SEGMENTS", "4"))
+    )
+    direct_nav_odom_settle_s: float = field(
+        default_factory=lambda: float(os.getenv("RDB_DIRECT_NAV_ODOM_SETTLE_S", "0.35"))
+    )
+    direct_nav_reach_tolerance_m: float = field(
+        default_factory=lambda: float(os.getenv("RDB_DIRECT_NAV_REACH_TOLERANCE_M", "0.015"))
+    )
+    direct_nav_reach_tolerance_yaw_deg: float = field(
+        default_factory=lambda: float(
+            os.getenv("RDB_DIRECT_NAV_REACH_TOLERANCE_YAW_DEG", "2.0")
+        )
     )
     direct_nav_require_robotodom: bool = field(
         default_factory=lambda: _env_bool("RDB_DIRECT_NAV_REQUIRE_ROBOTODOM", True)

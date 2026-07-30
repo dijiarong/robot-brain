@@ -114,6 +114,8 @@ class UnitreeNavigationSensorProvider:
             reason=reason,
         )
 
+    _MAP_FRAMES = frozenset({"world", "odom"})
+
     def _normalize_obstacle_cloud(
         self,
         cloud: PointCloudSnapshot | None,
@@ -121,15 +123,30 @@ class UnitreeNavigationSensorProvider:
     ) -> PointCloudSnapshot | None:
         """Convert Unitree's odom/world voxel map into the robot body frame.
 
-        The conversion is allowed only when the frame carries a sensor origin
-        close to the simultaneously observed Go2 odometry pose.  This prevents
-        an unrelated map/world frame from silently becoming obstacle data.
+        Go2 built-in voxel maps commonly arrive as ``world`` or ``odom``.
+
+        For ``odom`` clouds that share the session-local ``robot_pose`` frame,
+        always transform with the live robot pose.  The payload ``origin`` field
+        on Unitree voxel maps is typically the grid AABB corner (e.g. -3.225 m),
+        not a TF sensor origin, so it must not gate or drive the transform.
+
+        For ``world`` clouds, keep the stricter gate: only convert when a
+        payload origin is present and close to the simultaneous Go2 odometry.
         """
-        if cloud is None or cloud.frame_id != "world" or cloud.origin_xyz is None:
+        if cloud is None or cloud.frame_id in self._obstacle_frames:
             return cloud
-        ox, oy, oz = cloud.origin_xyz
-        if math.hypot(ox - pose.x_m, oy - pose.y_m) > self._max_world_origin_error_m:
+        if cloud.frame_id not in self._MAP_FRAMES:
             return cloud
+
+        if cloud.frame_id == "odom" and pose.frame_id == "odom":
+            ox, oy, oz = pose.x_m, pose.y_m, pose.z_m
+        elif cloud.frame_id == "world" and cloud.origin_xyz is not None:
+            ox, oy, oz = cloud.origin_xyz
+            if math.hypot(ox - pose.x_m, oy - pose.y_m) > self._max_world_origin_error_m:
+                return cloud
+        else:
+            return cloud
+
         yaw = math.radians(pose.yaw_deg)
         cos_yaw, sin_yaw = math.cos(yaw), math.sin(yaw)
         body_points: list[tuple[float, float, float]] = []
@@ -147,7 +164,7 @@ class UnitreeNavigationSensorProvider:
             frame_id="base_link",
             sensor_timestamp=cloud.sensor_timestamp,
             received_monotonic=cloud.received_monotonic,
-            source=f"{cloud.source}:world_to_base",
+            source=f"{cloud.source}:{cloud.frame_id}_to_base",
             timestamp_valid=cloud.timestamp_valid,
             origin_xyz=(0.0, 0.0, 0.0),
         )

@@ -242,12 +242,17 @@ class AgentRuntime:
                 navigation = DirectGo2NavigationClient(
                     robot,
                     sensors,
+                    linear_speed_mps=settings.unitree_max_speed,
+                    yaw_speed_rps=settings.unitree_max_yaw_speed,
                     segment_duration_s=settings.direct_nav_segment_duration_s,
                     obstacle_stop_m=settings.direct_nav_obstacle_stop_m,
                     obstacle_half_width_m=settings.direct_nav_obstacle_half_width_m,
                     min_progress_m=settings.odom_progress_min_m,
                     min_progress_yaw_deg=settings.odom_progress_min_yaw_deg,
                     max_no_progress_segments=settings.direct_nav_no_progress_segments,
+                    odom_settle_s=settings.direct_nav_odom_settle_s,
+                    reach_tolerance_m=settings.direct_nav_reach_tolerance_m,
+                    reach_tolerance_yaw_deg=settings.direct_nav_reach_tolerance_yaw_deg,
                 )
             elif settings.robot_backend == "mock" and settings.navigation_backend in {"auto", "fake"}:
                 navigation = FakeNavigationClient()

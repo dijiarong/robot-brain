@@ -44,7 +44,10 @@ class DirectGo2NavigationClient(NavigationClient):
         obstacle_half_width_m: float = 0.28,
         min_progress_m: float = 0.02,
         min_progress_yaw_deg: float = 2.0,
-        max_no_progress_segments: int = 2,
+        max_no_progress_segments: int = 4,
+        odom_settle_s: float = 0.35,
+        reach_tolerance_m: float = 0.015,
+        reach_tolerance_yaw_deg: float = 2.0,
     ) -> None:
         self._robot = robot
         self._sensors = sensors
@@ -56,6 +59,9 @@ class DirectGo2NavigationClient(NavigationClient):
         self._min_progress_m = min_progress_m
         self._min_progress_yaw = min_progress_yaw_deg
         self._max_no_progress = max_no_progress_segments
+        self._odom_settle_s = odom_settle_s
+        self._reach_tol_m = reach_tolerance_m
+        self._reach_tol_yaw = reach_tolerance_yaw_deg
         self._state = NavigationState(
             provider="direct_go2",
             ready=False,
@@ -176,69 +182,169 @@ class DirectGo2NavigationClient(NavigationClient):
         yaw_total = abs(goal.yaw_degrees)
         translation_done = 0.0
         yaw_done = 0.0
+        # Cumulative progress from the goal-start pose.  Per-segment deltas are
+        # unreliable on 4G Remote: motion often arrives in odometry one segment late.
+        progress_anchor_m = 0.0
+        progress_anchor_yaw = 0.0
         try:
             if translation_total > 1e-3:
-                vx = self._linear_speed * goal.forward_m / translation_total
-                vy = self._linear_speed * goal.left_m / translation_total
-                remaining_time = translation_total / self._linear_speed
-                while remaining_time > 1e-3:
-                    duration = min(self._segment_duration, remaining_time)
+                ux = goal.forward_m / translation_total
+                uy = goal.left_m / translation_total
+                vx = self._linear_speed * ux
+                vy = self._linear_speed * uy
+                while True:
                     current = await self._sensors.get_snapshot()
                     failure = self._guard(current, goal, started)
                     if failure:
                         await self._robot.stop(failure[1])
                         self._finish(*failure)
                         return
+                    translation_done = _goal_axis_progress_m(
+                        initial, current, goal.forward_m, goal.left_m
+                    )
+                    if translation_done >= translation_total - self._reach_tol_m:
+                        previous = current
+                        self._set_progress(
+                            translation_done, translation_total, yaw_done, yaw_total, current
+                        )
+                        break
+                    remaining = max(0.0, translation_total - translation_done)
+                    # Prefer a duration that matches remaining distance, but keep a
+                    # short floor so Go2 can start stepping after prep.
+                    ideal = remaining / max(self._linear_speed, 1e-3)
+                    gait_floor = 0.45 if translation_done < 1e-3 else 0.25
+                    segment_cap = max(self._segment_duration, gait_floor)
+                    duration = min(segment_cap, max(gait_floor, ideal))
                     await self._robot.drive(vx=vx, vy=vy, duration=duration)
-                    after = await self._sensors.get_snapshot()
-                    delta = _translation_delta(previous, after)
-                    if delta < self._min_progress_m:
+                    after = await self._snapshot_after_motion(previous, duration)
+                    cumulative = _goal_axis_progress_m(
+                        initial, after, goal.forward_m, goal.left_m
+                    )
+                    gained = cumulative - progress_anchor_m
+                    if gained < _segment_min_progress_m(
+                        self._min_progress_m, self._linear_speed, duration
+                    ):
                         no_progress += 1
                     else:
                         no_progress = 0
+                        progress_anchor_m = cumulative
                     if no_progress >= self._max_no_progress:
                         await self._robot.stop("local navigation made no progress")
-                        self._finish(NavigationStatus.NO_PROGRESS, "local navigation made no progress", "no_progress")
+                        self._finish(
+                            NavigationStatus.NO_PROGRESS,
+                            "local navigation made no progress",
+                            "no_progress",
+                            after,
+                        )
                         return
-                    translation_done = min(translation_total, translation_done + delta)
+                    translation_done = cumulative
                     previous = after
-                    remaining_time -= duration
-                    self._set_progress(translation_done, translation_total, yaw_done, yaw_total, after)
+                    self._set_progress(
+                        translation_done, translation_total, yaw_done, yaw_total, after
+                    )
 
             no_progress = 0
+            yaw_initial = previous
             if yaw_total >= 1.0:
                 vyaw = self._yaw_speed if goal.yaw_degrees > 0 else -self._yaw_speed
-                remaining_time = math.radians(yaw_total) / self._yaw_speed
-                while remaining_time > 1e-3:
-                    duration = min(self._segment_duration, remaining_time)
+                while True:
                     current = await self._sensors.get_snapshot()
                     failure = self._guard(current, goal, started, check_obstacle=False)
                     if failure:
                         await self._robot.stop(failure[1])
                         self._finish(*failure)
                         return
+                    yaw_done = _yaw_delta(yaw_initial, current)
+                    if yaw_done >= yaw_total - self._reach_tol_yaw:
+                        previous = current
+                        self._set_progress(
+                            translation_done, translation_total, yaw_done, yaw_total, current
+                        )
+                        break
+                    remaining_yaw = max(0.0, yaw_total - yaw_done)
+                    duration = min(
+                        self._segment_duration,
+                        max(0.12, math.radians(remaining_yaw) / max(self._yaw_speed, 1e-3)),
+                    )
                     await self._robot.drive(vyaw=vyaw, duration=duration)
-                    after = await self._sensors.get_snapshot()
-                    delta_yaw = _yaw_delta(previous, after)
-                    if delta_yaw < self._min_progress_yaw:
+                    after = await self._snapshot_after_motion(previous, duration)
+                    cumulative_yaw = _yaw_delta(yaw_initial, after)
+                    gained_yaw = cumulative_yaw - progress_anchor_yaw
+                    if gained_yaw < self._min_progress_yaw:
                         no_progress += 1
                     else:
                         no_progress = 0
+                        progress_anchor_yaw = cumulative_yaw
                     if no_progress >= self._max_no_progress:
                         await self._robot.stop("local rotation made no progress")
-                        self._finish(NavigationStatus.NO_PROGRESS, "local rotation made no progress", "no_progress")
+                        self._finish(
+                            NavigationStatus.NO_PROGRESS,
+                            "local rotation made no progress",
+                            "no_progress",
+                            after,
+                        )
                         return
-                    yaw_done = min(yaw_total, yaw_done + delta_yaw)
+                    yaw_done = cumulative_yaw
                     previous = after
-                    remaining_time -= duration
-                    self._set_progress(translation_done, translation_total, yaw_done, yaw_total, after)
-            self._finish(NavigationStatus.SUCCEEDED, "relative goal reached", None, previous, progress=1.0)
+                    self._set_progress(
+                        translation_done, translation_total, yaw_done, yaw_total, after
+                    )
+
+            translation_ok = (
+                translation_total <= 1e-3
+                or translation_done >= translation_total - self._reach_tol_m
+            )
+            yaw_ok = yaw_total < 1.0 or yaw_done >= yaw_total - self._reach_tol_yaw
+            if translation_ok and yaw_ok:
+                self._finish(
+                    NavigationStatus.SUCCEEDED,
+                    "relative goal reached",
+                    None,
+                    previous,
+                    progress=1.0,
+                )
+            else:
+                await self._robot.stop("relative goal not reached within tolerance")
+                self._finish(
+                    NavigationStatus.TIMED_OUT,
+                    "relative goal not reached within tolerance",
+                    "not_reached",
+                    previous,
+                )
         except asyncio.CancelledError:
             self._finish(NavigationStatus.CANCELED, "navigation canceled", "canceled")
             raise
         except Exception as exc:
             await self._robot.stop("local navigation provider error")
             self._finish(NavigationStatus.FAILED, f"local navigation failed: {exc}", "provider_error")
+
+    async def _snapshot_after_motion(
+        self,
+        before: NavigationSensorSnapshot,
+        duration: float,
+    ) -> NavigationSensorSnapshot:
+        """Poll sensors after a drive so delayed Remote odometry can catch up."""
+        settle = min(self._odom_settle_s, max(0.12, duration))
+        deadline = time.monotonic() + settle
+        best = await self._sensors.get_snapshot()
+        best_delta = _translation_delta(before, best) + math.radians(
+            _yaw_delta(before, best)
+        )
+        while time.monotonic() < deadline:
+            await asyncio.sleep(0.05)
+            snap = await self._sensors.get_snapshot()
+            score = _translation_delta(before, snap) + math.radians(
+                _yaw_delta(before, snap)
+            )
+            if score >= best_delta:
+                best = snap
+                best_delta = score
+            if (
+                _translation_delta(before, snap) >= self._min_progress_m
+                or _yaw_delta(before, snap) >= self._min_progress_yaw
+            ):
+                return snap
+        return best
 
     def _guard(
         self,
@@ -299,6 +405,35 @@ def _navigation_pose(snapshot: NavigationSensorSnapshot | None) -> NavigationPos
         return None
     pose = snapshot.pose
     return NavigationPose(x_m=pose.x_m, y_m=pose.y_m, yaw_degrees=pose.yaw_deg, frame_id=pose.frame_id)
+
+
+def _segment_min_progress_m(
+    configured_min_m: float, linear_speed_mps: float, duration_s: float
+) -> float:
+    """Require a fraction of the commanded segment, never above the configured floor."""
+    expected = max(0.0, linear_speed_mps) * max(0.0, duration_s)
+    return min(configured_min_m, max(0.005, 0.35 * expected))
+
+
+def _goal_axis_progress_m(
+    start: NavigationSensorSnapshot,
+    current: NavigationSensorSnapshot,
+    forward_m: float,
+    left_m: float,
+) -> float:
+    """Project odom displacement onto the original body-frame goal axis."""
+    if start.pose is None or current.pose is None:
+        return 0.0
+    goal_len = math.hypot(forward_m, left_m)
+    if goal_len <= 1e-6:
+        return 0.0
+    dx = current.pose.x_m - start.pose.x_m
+    dy = current.pose.y_m - start.pose.y_m
+    yaw0 = math.radians(start.pose.yaw_deg)
+    body_forward = dx * math.cos(yaw0) + dy * math.sin(yaw0)
+    body_left = -dx * math.sin(yaw0) + dy * math.cos(yaw0)
+    ux, uy = forward_m / goal_len, left_m / goal_len
+    return max(0.0, body_forward * ux + body_left * uy)
 
 
 def _translation_delta(before: NavigationSensorSnapshot, after: NavigationSensorSnapshot) -> float:

@@ -742,6 +742,7 @@ class UnitreeWebRTCTransport(UnitreeTransport):
         self._drive_idle = threading.Event()
         self._drive_idle.set()
         self._last_drive_end_reason: MotionEndReason | None = None
+        self._last_sport_api: dict[str, Any] = {}
         # Health / observability
         self._health = WebRTCHealth()
         # Connection state machine
@@ -1414,6 +1415,11 @@ class UnitreeWebRTCTransport(UnitreeTransport):
         # non-zero code means the robot received but rejected the command
         # (e.g. wrong control mode), which otherwise looks like success.
         code = _extract_status_code(response)
+        self._last_sport_api = {
+            "api_id": api_id,
+            "status_code": code,
+            "parameter": parameter,
+        }
         logger.info(
             "WebRTC sport response: api_id=%s status_code=%s raw=%s",
             api_id, code, response,
@@ -1713,9 +1719,20 @@ class UnitreeWebRTCTransport(UnitreeTransport):
     ) -> Any:
         if self._bg_loop is not None and self._bg_loop.is_running():
             fut = asyncio.run_coroutine_threadsafe(coro, self._bg_loop)
+            # wrap_future so Ctrl+C / task cancel can abort promptly; to_thread(fut.result)
+            # only cancels the waiter and leaves the bg velocity stream running.
+            afut = asyncio.wrap_future(fut)
             try:
-                return await asyncio.to_thread(fut.result, timeout)
+                return await asyncio.wait_for(afut, timeout=timeout)
+            except asyncio.CancelledError:
+                fut.cancel()
+                with self._motion_lock:
+                    self._motion_gen += 1
+                raise
             except TimeoutError:
+                fut.cancel()
+                with self._motion_lock:
+                    self._motion_gen += 1
                 self._health.bridge_call_timeouts += 1
                 raise
         return await coro
