@@ -20,15 +20,15 @@ Goal ID：`019fa248-8281-7171-b5aa-64edd04a001f`
 
 > 在 robot-brain 中实现基于可替换 Navigation Provider 的 Go2 空间物品记忆完整闭环：第一阶段利用 Go2 自带 LiDAR、里程计和现有 Navigation/Nav2 能力完成安全的局部导航、动态避障与真机验收；第二阶段增加 map 坐标绝对目标、定位/重定位状态和地图身份契约；第三阶段将房间、物品观察点和跨房间查找重构为地图/会话绑定的持久记忆，所有真机移动经导航 Provider 执行，并保留后续接入 Mid-360/Super-LIO 或其他 SLAM 后端的能力。
 
-**2026-07-30 结论：** 第一阶段真机验收已收口（见 §1.4）。第二阶段主线以 **Go2 自带 L1 激光雷达为默认传感器**：WebRTC → ROS2 `/odom` `/scan` → Nav2 → `/cmd_vel`→Move 已真机前进。**Mid-360 / Super-LIO 仅为可选增强后端**，不是框架硬依赖。当前缺口：短距 absolute 尚未稳定 `succeeded`；定位仍是会话内 `map≡odom`，下一步用 L1 做 2D 建图 + AMCL 换真 `map→odom`。
+**2026-07-30 结论：** 第一阶段真机验收已收口（见 §1.4）。第二阶段默认路径（L1 建图 + AMCL + map 绝对目标 + `/cmd_vel`→Move）已真机收口：同图 `--live-absolute` 出现 `ok=true` / `succeeded`。**Mid-360 / Super-LIO 仅为可选增强后端**。当前主缺口在第三阶段真机「记点→离开→返回」与重定位触发 API。
 
 ### 1.2 Goal 分阶段状态
 
 | 阶段 | 原计划 | 当前状态 | 还缺什么 |
 |---|---|---|---|
 | 第一阶段 | Go2 自带 LiDAR + odom，局部导航、动态避障、真机验收 | **真机验收通过（2026-07-29）** | 无阻塞；精度/速度不作为本阶段硬指标 |
-| 第二阶段 | map 绝对目标、定位/重定位、地图身份 | Provider + L1→Nav2 动狗已通；短距 absolute `succeeded`；**L1 建图 + AMCL 只读 `localized`（2026-07-30）** | 同图上 live-absolute；重定位触发 API 仍缺 |
-| 第三阶段 | 房间/物品观察点持久化、跨房间查找 | 重构和离线闭环测试已完成 | 真机地图上录入房间/物品并完成跨 session 返回测试 |
+| 第二阶段 | map 绝对目标、定位/重定位、地图身份 | **L1 建图 + AMCL + live-absolute 真机通过（2026-07-30）** | 重定位触发 API 仍缺；长距/绕障可另补 |
+| 第三阶段 | 房间/物品观察点持久化、跨房间查找 | 离线闭环已完成；**`--live-return` 脚本已就绪** | 真机跑通记点返回；完整 VLM 扫房间仍可选 |
 | 后续扩展（可选） | Mid-360 / Super-LIO / 其他 SLAM | 接口预留；**非必选** | 有外接雷达时再换更强定位后端，RB 契约不变 |
 
 ### 1.4 第一阶段真机验收结论（2026-07-29）
@@ -387,7 +387,29 @@ python scripts/verify_nav2_provider.py
 
 脚本：`phase2_go2_lidar_mapping.sh`、`phase2_go2_lidar_localize.sh`；桥用 `--no-publish-map-tf`。旧的 `phase2_go2_lidar_nav2.sh` 仍可用于会话内假定位冒烟。
 
-**2026-07-30 定位只读收口：** 已存 `lab_floor1` 图；`phase2_go2_lidar_localize.sh` + `/initialpose` 后 `verify_nav2_provider.py` 出现 `ok=true`、`localization.status=localized`、`usable_for_persistent_memory=true`（map 位姿与 odom 位姿可不同，说明 AMCL 在维护 `map→odom`）。下一步：同图上 `--live-absolute` 短距动狗；再进入第三阶段空间记忆真机。
+**2026-07-30 定位只读收口：** 已存 `lab_floor1` 图；`phase2_go2_lidar_localize.sh` + `/initialpose` 后 `verify_nav2_provider.py` 出现 `ok=true`、`localization.status=localized`、`usable_for_persistent_memory=true`（map 位姿与 odom 位姿可不同，说明 AMCL 在维护 `map→odom`）。
+
+**2026-07-30 同图 live-absolute 收口：** `ENABLE_CMD_VEL=1` 下 `--live-absolute --absolute-dx-m 0.3` 出现 `ok=true` / `succeeded`。`phase2_go2_lidar_localize.sh` 现为 **先等 `/amcl_pose`（须设 `/initialpose`）再起 Nav2**，避免 costmap 超时 Aborting。
+
+### 3.7 第三阶段真机：记点 → 离开 → 返回（Nav2）
+
+前置：终端 A 已跑 localize（运动开）且 Nav2 已起来；前方约 1m 净空。另开 RViz：
+
+```bash
+bash /home/dijia/project/Navigation/scripts/phase2_go2_rviz.sh
+```
+
+```bash
+# 终端 B（先 venv 再 ROS）
+source /home/dijia/project/Robot-Brain/.venv-jazzy/bin/activate
+source /opt/ros/jazzy/setup.bash
+cd /home/dijia/project/Robot-Brain
+export RDB_NAVIGATION_BACKEND=nav2 RDB_NAV2_MAP_ID=lab-floor1 RDB_NAV2_MAP_VERSION=v1
+# 硬验收：默认 away=1m；away 后 map 位移须 ≥ away*0.5，否则判假成功失败
+python scripts/verify_spatial_memory_navigation.py --live-return --away-m 1.0 --timeout-s 120
+```
+
+成功条件：`ok=true`；`away_travel_m` ≥ `min_away_m`；away/return 均 `succeeded`；`distance_to_anchor_m` ≤ `--reach-tolerance-m`（默认 0.25）。RViz 应见青色锚点与橙色 `/goal_pose`。记忆写入 `data/spatial_phase3.sqlite`（gitignore）。离线仍跑：`python scripts/verify_spatial_memory_navigation.py`。
 
 ## 4. 安装
 
