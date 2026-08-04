@@ -71,7 +71,7 @@ class Settings:
         default_factory=lambda: float(os.getenv("RDB_NAV2_SERVER_TIMEOUT_S", "2.0"))
     )
     nav2_pose_timeout_s: float = field(
-        default_factory=lambda: float(os.getenv("RDB_NAV2_POSE_TIMEOUT_S", "1.0"))
+        default_factory=lambda: float(os.getenv("RDB_NAV2_POSE_TIMEOUT_S", "3.0"))
     )
     nav2_cancel_timeout_s: float = field(
         default_factory=lambda: float(os.getenv("RDB_NAV2_CANCEL_TIMEOUT_S", "2.0"))

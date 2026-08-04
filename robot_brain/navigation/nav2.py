@@ -346,23 +346,37 @@ class RclpyNav2Bridge:
         with self._lock:
             if not self._ensure() or self._tf_buffer is None:
                 return None
-            deadline = time.monotonic() + timeout_s
+            from rclpy.time import Time
+
+            # TransformListener (spin_thread=False) only fills the buffer when we
+            # spin; lookup_transform(timeout=...) waits without spinning, so it
+            # often fails with "frame does not exist" / ExtrapolationException.
+            deadline = time.monotonic() + max(0.5, timeout_s)
+            last_err: Exception | None = None
             while time.monotonic() < deadline:
+                self._rclpy.spin_once(self._node, timeout_sec=0.05)
                 try:
                     transform = self._tf_buffer.lookup_transform(
-                        frame_id, self._base_frame, self._rclpy.time.Time()
+                        frame_id,
+                        self._base_frame,
+                        Time(),
                     )
                     t = transform.transform.translation
                     q = transform.transform.rotation
                     siny = 2.0 * (q.w * q.z + q.x * q.y)
                     cosy = 1.0 - 2.0 * (q.y * q.y + q.z * q.z)
                     return NavigationPose(
-                        x_m=float(t.x), y_m=float(t.y),
+                        x_m=float(t.x),
+                        y_m=float(t.y),
                         yaw_degrees=math.degrees(math.atan2(siny, cosy)),
                         frame_id=frame_id,
                     )
-                except Exception:
-                    self._rclpy.spin_once(self._node, timeout_sec=0.05)
+                except Exception as exc:  # noqa: BLE001
+                    last_err = exc
+            if last_err is not None and self._node is not None:
+                self._node.get_logger().debug(
+                    f"get_pose_in_frame({frame_id}) failed: {last_err}"
+                )
             return None
 
     def send_goal(
@@ -463,6 +477,7 @@ class RclpyNav2Bridge:
             from nav2_msgs.action import NavigateToPose
             from nav_msgs.msg import Odometry
             from rclpy.action import ActionClient
+            from rclpy.duration import Duration
             from tf2_ros import Buffer, TransformListener
         except Exception:
             return False
@@ -474,7 +489,9 @@ class RclpyNav2Bridge:
             self._node = rclpy.create_node(self._node_name)
             self._navigate_type = NavigateToPose
             self._action_client = ActionClient(self._node, NavigateToPose, self._action_name)
-            self._tf_buffer = Buffer()
+            self._tf_buffer = Buffer(cache_time=Duration(seconds=30.0))
+            # Keep spin_thread=False: a background executor on the same node races
+            # with our action-client spin_once and makes Nav2 look "unavailable".
             self._tf_listener = TransformListener(self._tf_buffer, self._node)
             self._node.create_subscription(Odometry, self._odom_topic, self._on_odom, 10)
             return True

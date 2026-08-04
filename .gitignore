@@ -10,3 +10,4 @@ data/
 .claude/
 # ZEPERION config + runtime artifacts (do not commit)
 .zeperion/
+.venv-jazzy/
