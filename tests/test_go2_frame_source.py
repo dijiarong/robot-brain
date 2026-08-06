@@ -44,7 +44,7 @@ class Go2VideoFrameSourceTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(await fs.get_frame())
 
     async def test_drain_captures_latest_jpeg(self):
-        fs = Go2VideoFrameSource()
+        fs = Go2VideoFrameSource(minimum_frame_interval_s=0.0)
         track = _FakeTrack([_make_frame((255, 0, 0)), _make_frame((0, 255, 0))])
         fs.attach_track(track)
         # Let the drain task process both frames.

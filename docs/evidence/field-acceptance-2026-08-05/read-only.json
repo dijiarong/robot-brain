@@ -1,0 +1,30 @@
+{
+  "goal": {
+    "forward_m": 0.3,
+    "left_m": 0.0,
+    "max_duration_s": 20.0
+  },
+  "mode": "read_only",
+  "ok": true,
+  "provider": "native_go2",
+  "scenario": "straight",
+  "sensors": {
+    "obstacle_frame": "base_link",
+    "point_count": 18731,
+    "pointcloud_age_seconds": 0.06380179198458791,
+    "pose": {
+      "frame_id": "odom",
+      "timestamp": 1785892325.5926683,
+      "x_m": 0.003599,
+      "y_m": 0.004188,
+      "yaw_deg": 2.133699117163227,
+      "z_m": 0.0
+    },
+    "pose_age_seconds": 0.029570541810244322,
+    "pose_source": "unitree_robotodom",
+    "ready": true,
+    "reason": null
+  },
+  "started_at": 1785892319.0385401,
+  "stop_reason": "read_only_complete"
+}

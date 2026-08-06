@@ -1,0 +1,36 @@
+{
+  "schema": "robot-brain.native-terrain3d-evidence.v1",
+  "generated_at": "2026-08-04T18:32:07+08:00",
+  "dependency_gate": {
+    "forbidden": ["dimos", "rclpy", "open3d", "reactivex"],
+    "loaded": []
+  },
+  "runs": [
+    {
+      "source": "/Users/dijia/project/topsun_dimos/data/unity_sim_x86/traversable_area.ply",
+      "source_kind": "DIMOS Unity traversable-area fixture",
+      "input_points": 62496,
+      "surface_nodes": 4251,
+      "connected_component_nodes": 4251,
+      "path_nodes": 122,
+      "path_length_m": 28.78786626548615,
+      "elevation_gain_m": 0.01688147880735294,
+      "ok": true
+    },
+    {
+      "source": "/Users/dijia/project/mid360/output/map_clean.ply",
+      "source_kind": "Mid360 recorded binary PLY, deterministically sampled to verifier budget",
+      "input_points": 390756,
+      "surface_nodes": 348791,
+      "connected_component_nodes": 94,
+      "path_nodes": 26,
+      "path_length_m": 6.524642265509369,
+      "elevation_gain_m": 0.9640312194824219,
+      "ok": true
+    }
+  ],
+  "limitations": [
+    "Offline planning proves parsing, surface extraction, connected traversability and path generation; it does not prove physical stair traversal.",
+    "Wall/edge clearance and morphological closing still require staged geometry and live-motion evidence before final acceptance."
+  ]
+}

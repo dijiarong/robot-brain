@@ -312,7 +312,7 @@ class UnitreeRobot(RobotInterface):
         await self.set_posture("hello")
 
     async def enable_omni_teleop(self) -> None:
-        """Enable SwitchJoystick + low SpeedLevel after FreeWalk (WebRTC MCF)."""
+        """Enable SwitchJoystick + SpeedLevel after FreeWalk (WebRTC MCF)."""
         self._record("enable_omni_teleop")
         if self.dry_run:
             logger.info("[DRY-RUN] enable_omni_teleop")
@@ -501,3 +501,22 @@ class UnitreeRobot(RobotInterface):
     def _record(self, action: str, **params: Any) -> None:
         entry = {"action": action, "timestamp": time.time(), **params}
         self._action_history.append(entry)
+
+
+async def prepare_locomotion(robot: UnitreeRobot) -> None:
+    """DimOS-style wake: stand_up → balance_stand → free_walk → omni teleop.
+
+    Shared by the teleop/gateway entry points and the dashboard service so the
+    Go2 reliably stands up after a cold boot even when it started lying down.
+    """
+    import asyncio
+
+    await robot.set_posture("stand_up")
+    await asyncio.sleep(3.0)
+    await robot.set_posture("balance_stand")
+    await asyncio.sleep(2.0)
+    await robot.set_posture("free_walk")
+    await asyncio.sleep(2.0)
+    await robot.enable_omni_teleop()
+    await asyncio.sleep(1.0)
+    await robot.get_state()

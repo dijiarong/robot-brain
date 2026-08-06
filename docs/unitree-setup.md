@@ -95,6 +95,9 @@ IP 且序列号、账号、密码齐全时自动切换云端。
 | `RDB_UNITREE_CLOUD_DEVICE_TYPE` | `Go2` | 云端 AppName/设备类型 |
 | `RDB_UNITREE_LIDAR_STREAM` | `false` | 显式请求自带 LiDAR 点云；`direct_go2` 导航会自动开启 |
 | `RDB_UNITREE_LIDAR_ALLOW_UNCOMPRESSED` | `false` | 诊断未压缩点云回退；4G 流量较大，不建议常开 |
+| `RDB_UNITREE_VIDEO_RELAY` | `true` | Go2 相机 → 本地 ffmpeg RTP（topsun）；与 Mid-360 同机时务必 `false` |
+| `RDB_UNITREE_AUDIO_RELAY` | `true` | 双向音频 ffmpeg RTP；同上 |
+| `RDB_UNITREE_MEDIA_ON_DEMAND` | `false` | `true` 时连接不启 ffmpeg，需 `POST /api/media/relays/start` 或 `ensure_media_relays()` |
 | `RDB_UNITREE_NET_IFACE` | 空 | SDK 用 CycloneDDS 网卡名（如 `en0`），**不是**机器人 IP |
 | `RDB_UNITREE_MOTION_MODE` | `mcf` | WebRTC 连接后 motion switcher 模式 |
 
@@ -118,7 +121,7 @@ IP 且序列号、账号、密码齐全时自动切换云端。
 | `RDB_UNITREE_STATE_MAX_AGE_SECONDS` | `2.0` | 运动前状态最大陈旧时间 |
 | `RDB_UNITREE_POST_DRIVE_STOP_TIMEOUT` | `3.0` | drive 后等待停稳超时 |
 | `RDB_UNITREE_WEBRTC_CONNECT_TIMEOUT` | `30.0` | WebRTC 连接超时 |
-| `RDB_UNITREE_WEBRTC_DRIVE_VIA_MOVE` | `true` | MCF 下启用 Move(1008)；含 vyaw 时自动改走虚拟摇杆 |
+| `RDB_UNITREE_WEBRTC_DRIVE_VIA_MOVE` | `true` | MCF 下纯平移/纯旋转使用 Move(1008)；平移与 yaw 组合弧线自动改走虚拟摇杆 |
 
 ## 验证流程
 
@@ -226,6 +229,41 @@ Go2 MCF 模式下速度下发采用**混合策略**（见 `UnitreeWebRTCTranspor
 | 含转向 (vyaw)，含 W+D 弧线 | 虚拟摇杆 | `rt/wirelesscontroller`，与 DimOS 一致 |
 
 停止时：`release` 只发零帧；`stop` 零帧 + `StopMove`。Web 按住操控使用 `stream_hold` 连续 50Hz 流，避免分片归零造成卡顿。
+
+## Mid-360 Navigation 联调（Orin + 边上 brain）
+
+默认全开的 brain（WebRTC + ffmpeg 音视频中继 + 可选 native/VLM）不宜与狗上
+Livox + Super-LIO + Nav2 同机硬叠。推荐：
+
+1. **Orin**：只跑 Navigation（`config/profiles/orin-nav-only.env` 明示拒绝 brain 媒体栈）。
+2. **边上机 / 笔记本**：lean brain + `RDB_NAVIGATION_BACKEND=nav2`，同 Wi‑Fi、同 `ROS_DOMAIN_ID`。
+
+```bash
+# Orin：启动导航栈后采资源基线（确认无 ffmpeg / robot-brain）
+./scripts/collect_orin_nav_baseline.sh
+
+# 边上机：加载 lean 配置
+./scripts/run_with_profile.sh edge-brain-lean python -m examples.run_service
+
+# 只读：action / odom / localization
+./scripts/run_with_profile.sh edge-brain-lean python scripts/verify_nav2_provider.py
+
+# 控制面：状态、随时 cancel、cancel 后再发 goal（默认可恢复）
+./scripts/run_with_profile.sh edge-brain-lean \
+  python scripts/verify_nav2_control_surface.py --read-only
+```
+
+关键开关：
+
+| 变量 | lean 建议 | 说明 |
+|------|-----------|------|
+| `RDB_NAVIGATION_BACKEND` | `nav2` | 经 `/navigate_to_pose` 间接动腿 |
+| `RDB_UNITREE_VIDEO_RELAY` / `AUDIO_RELAY` | `false` | 不启 ffmpeg |
+| `RDB_UNITREE_MEDIA_ON_DEMAND` | `true` | 需要媒体时再 `POST /api/media/relays/start` |
+| `RDB_UNITREE_LIDAR_STREAM` / `RDB_VLM_ENABLED` | `false` | 避免与 Mid-360 抢 CPU |
+
+控制面保留：`GET/WS` 导航状态、`POST /api/navigation/cancel`、map-goal / Nav2 goal 可重复下发。
+进程内遥操作走共享 `MotionAuthority`（dashboard / gRPC / gateway 同一 `TeleopSession`），避免多租约抢电机。
 
 ## 回退到 Mock
 

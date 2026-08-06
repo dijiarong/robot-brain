@@ -22,6 +22,7 @@ from config.settings import Settings
 from robot_brain.actuation.unitree import UnitreeRobot
 from robot_brain.control.generated import control_pb2 as pb
 from robot_brain.control.generated import control_pb2_grpc as pb_grpc
+from robot_brain.navigation.base import NavigationClient
 from robot_brain.teleop.session import ControlEvent, ControlEventType, TeleopSession
 
 logger = logging.getLogger(__name__)
@@ -116,13 +117,16 @@ def build_server(
     robot: UnitreeRobot,
     settings: Settings,
     address: str = "127.0.0.1:50071",
+    navigation: NavigationClient | None = None,
 ) -> tuple[grpc.aio.Server, str]:
     """Create (but do not start) an aio gRPC server bound to *address*.
 
     Returns the server and the resolved bind address (with the chosen port,
     useful when *address* ends in ``:0``).
     """
-    session = TeleopSession(robot, settings)
+    from robot_brain.control.authority import session_or_create
+
+    session = session_or_create(robot, settings, navigation)
     server = grpc.aio.server()
     pb_grpc.add_RobotControlServicer_to_server(RobotControlServicer(session), server)
     bound_port = server.add_insecure_port(address)
@@ -134,9 +138,10 @@ async def serve(
     robot: UnitreeRobot,
     settings: Settings,
     address: str = "127.0.0.1:50071",
+    navigation: NavigationClient | None = None,
 ) -> None:
     """Run the control server until cancelled."""
-    server, bound = build_server(robot, settings, address)
+    server, bound = build_server(robot, settings, address, navigation)
     await server.start()
     logger.info("robot-brain control plane listening on %s", bound)
     try:

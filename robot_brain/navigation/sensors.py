@@ -46,6 +46,12 @@ class UnitreeNavigationSensorProvider:
         max_world_origin_error_m: float = 0.75,
         require_authoritative_odom: bool = True,
     ) -> None:
+        if any(not math.isfinite(value) or value <= 0 for value in (
+            max_pose_age_s, max_pointcloud_age_s,
+        )) or not math.isfinite(max_world_origin_error_m) or max_world_origin_error_m < 0:
+            raise ValueError("invalid navigation sensor freshness/frame limits")
+        if not obstacle_frames:
+            raise ValueError("at least one trusted obstacle frame is required")
         self._transport = transport
         self._max_pose_age_s = max_pose_age_s
         self._max_pointcloud_age_s = max_pointcloud_age_s
@@ -77,16 +83,24 @@ class UnitreeNavigationSensorProvider:
             not self._require_authoritative_odom
             or state.pose_source == "unitree_robotodom"
         )
+        pose_values_ready = all(math.isfinite(value) for value in (
+            pose.x_m, pose.y_m, pose.z_m, pose.yaw_deg,
+        ))
         pose_ready = (
             math.isfinite(pose_age)
+            and pose_age >= 0.0
             and pose_age <= self._max_pose_age_s
             and source_ready
+            and pose_values_ready
         )
         cloud = self._normalize_obstacle_cloud(cloud, pose)
+        cloud = self._finite_cloud(cloud)
         frame_ready = cloud is not None and cloud.frame_id in self._obstacle_frames
         cloud_ready = (
             cloud is not None
             and cloud.point_count > 0
+            and math.isfinite(cloud_age)
+            and cloud_age >= 0.0
             and cloud_age <= self._max_pointcloud_age_s
             and frame_ready
         )
@@ -94,14 +108,22 @@ class UnitreeNavigationSensorProvider:
         reason = None
         if not source_ready:
             reason = "authoritative_robotodom_unavailable"
+        elif not pose_values_ready:
+            reason = "invalid_odometry"
+        elif not math.isfinite(pose_age) or pose_age < 0.0:
+            reason = "invalid_odometry_timestamp"
         elif not pose_ready:
             reason = "stale_odometry"
         elif cloud is None:
             reason = "missing_pointcloud"
+        elif not math.isfinite(cloud_age) or cloud_age < 0.0:
+            reason = "invalid_pointcloud_timestamp"
         elif cloud_age > self._max_pointcloud_age_s:
             reason = "stale_pointcloud"
         elif not frame_ready:
             reason = "untrusted_obstacle_frame"
+        elif cloud.point_count == 0:
+            reason = "invalid_pointcloud"
         return NavigationSensorSnapshot(
             pose=pose,
             pointcloud=cloud,
@@ -112,6 +134,32 @@ class UnitreeNavigationSensorProvider:
             obstacle_frame=cloud.frame_id if cloud is not None else None,
             pose_source=state.pose_source,
             reason=reason,
+        )
+
+    @staticmethod
+    def _finite_cloud(cloud: PointCloudSnapshot | None) -> PointCloudSnapshot | None:
+        if cloud is None:
+            return None
+        filtered: list[tuple[float, float, float]] = []
+        for raw in cloud.points_xyz:
+            try:
+                if len(raw) != 3:
+                    continue
+                point = tuple(float(value) for value in raw)
+            except (TypeError, ValueError, OverflowError):
+                continue
+            if all(math.isfinite(value) for value in point):
+                filtered.append(point)  # type: ignore[arg-type]
+        points = tuple(filtered)
+        if points == cloud.points_xyz:
+            return cloud
+        return PointCloudSnapshot(
+            points_xyz=points, frame_id=cloud.frame_id,
+            sensor_timestamp=cloud.sensor_timestamp,
+            received_monotonic=cloud.received_monotonic,
+            source=f"{cloud.source}:finite_filter",
+            timestamp_valid=cloud.timestamp_valid,
+            origin_xyz=cloud.origin_xyz,
         )
 
     _MAP_FRAMES = frozenset({"world", "odom"})

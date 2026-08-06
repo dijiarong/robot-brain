@@ -83,6 +83,10 @@ class Go2VideoFrameSource(FrameSource):
     JPEG) and caches only the newest frame; :meth:`get_frame` returns a copy
     without blocking the drain. Explore reads at most ~1 Hz, so this is cheap.
 
+    The av/PIL conversion is CPU-bound, so it runs in a worker thread instead
+    of the asyncio event loop; otherwise encoding a frame would block teleop
+    and HTTP handlers for tens of milliseconds per frame.
+
     Note: an aiortc video track delivers each frame to a single ``recv()``
     caller, so this source should be the track's consumer when VLM is active.
     Coexisting with the RTP relay on the same track requires a tee (future
@@ -92,10 +96,14 @@ class Go2VideoFrameSource(FrameSource):
 
     kind = "go2_tap"
 
-    def __init__(self) -> None:
+    def __init__(self, *, minimum_frame_interval_s: float = 0.35) -> None:
+        if minimum_frame_interval_s < 0:
+            raise ValueError("minimum frame interval cannot be negative")
         self._lock = asyncio.Lock()
         self._latest_jpeg: bytes | None = None
         self._task: asyncio.Task[None] | None = None
+        self._minimum_frame_interval_s = minimum_frame_interval_s
+        self._requested_until = time.monotonic() + 0.35
 
     def attach_track(self, track: Any) -> None:
         """Start draining *track* if not already consuming one."""
@@ -107,7 +115,15 @@ class Go2VideoFrameSource(FrameSource):
         try:
             while True:
                 frame = await track.recv()
-                jpeg = self._frame_to_jpeg(frame)
+                now = time.monotonic()
+                if now > self._requested_until:
+                    continue
+                if (
+                    self.last_frame_monotonic is not None
+                    and now-self.last_frame_monotonic < self._minimum_frame_interval_s
+                ):
+                    continue
+                jpeg = await asyncio.to_thread(self._frame_to_jpeg, frame)
                 if jpeg is not None:
                     async with self._lock:
                         self._latest_jpeg = jpeg
@@ -121,17 +137,32 @@ class Go2VideoFrameSource(FrameSource):
     def _frame_to_jpeg(frame: Any) -> bytes | None:
         try:
             img = frame.to_image()  # av.VideoFrame -> PIL.Image
+            img.thumbnail((640, 480))
             buf = BytesIO()
-            img.save(buf, format="JPEG", quality=85)
+            img.save(buf, format="JPEG", quality=72)
             return buf.getvalue()
         except Exception as exc:  # noqa: BLE001
             logger.debug("frame->jpeg failed: %s", exc)
             return None
 
     async def get_frame(self) -> bytes | None:
+        self._requested_until = time.monotonic() + 0.35
         async with self._lock:
             return self._latest_jpeg
 
     def stop(self) -> None:
         if self._task is not None and not self._task.done():
             self._task.cancel()
+
+    async def aclose(self) -> None:
+        """Cancel and join the decoder task so no media work survives shutdown."""
+        task = self._task
+        self._task = None
+        if task is None:
+            return
+        if not task.done():
+            task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass

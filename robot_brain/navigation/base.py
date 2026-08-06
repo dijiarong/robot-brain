@@ -65,10 +65,11 @@ class LocalizationState(BaseModel):
 
 
 class RelativeNavigationGoal(BaseModel):
-    forward_m: float = Field(default=0.0, ge=-1.0, le=1.0)
-    left_m: float = Field(default=0.0, ge=-0.5, le=0.5)
+    forward_m: float = Field(default=0.0, ge=-3.0, le=3.0)
+    left_m: float = Field(default=0.0, ge=-3.0, le=3.0)
     yaw_degrees: float = Field(default=0.0, ge=-90.0, le=90.0)
-    max_duration_s: float = Field(default=12.0, ge=0.5, le=20.0)
+    require_final_yaw: bool = True
+    max_duration_s: float = Field(default=30.0, ge=0.5, le=120.0)
 
 
 class AbsoluteNavigationGoal(BaseModel):
@@ -93,6 +94,9 @@ class NavigationState(BaseModel):
     progress: float | None = Field(default=None, ge=0.0, le=1.0)
     message: str = ""
     error_code: str | None = None
+    path: list[NavigationPose] = Field(default_factory=list)
+    replan_count: int = 0
+    stop_reason: str | None = None
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 

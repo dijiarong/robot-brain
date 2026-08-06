@@ -107,7 +107,11 @@ class PassabilityAnalyzer:
         except Exception as exc:  # noqa: BLE001 - best-effort cleanup
             logger.warning("VLM client close failed: %s", exc)
         try:
-            self._frame_source.stop()
+            frame_aclose = getattr(self._frame_source, "aclose", None)
+            if callable(frame_aclose):
+                await frame_aclose()
+            else:
+                self._frame_source.stop()
         except Exception as exc:  # noqa: BLE001
             logger.warning("frame source stop failed: %s", exc)
 

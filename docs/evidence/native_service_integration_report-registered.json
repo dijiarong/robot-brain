@@ -1,0 +1,12 @@
+{
+  "artifacts": [
+    {
+      "path": "/Users/dijia/project/robot-brain/docs/evidence/2026-08-04-native-service-integration.json",
+      "sha256": "81cf80f39f34983b9dd75cb288d416a73e5af5262631d54ac62fa68eb243d8d5"
+    }
+  ],
+  "failures": [],
+  "gate_id": "native_service_integration_report",
+  "ok": true,
+  "schema_version": 1
+}

@@ -1,0 +1,102 @@
+{
+  "schema_version": 1,
+  "objective": "Complete DIMOS navigation capability extraction into robot-brain without DIMOS or Nav2 runtime dependencies",
+  "capabilities": [
+    {
+      "id": "sensors_transport",
+      "requirement": "Go2 authoritative odom, LiDAR, transforms, freshness, frame gates and safe cmd_vel transport",
+      "implementation": ["robot_brain/navigation/sensors.py", "robot_brain/actuation/unitree_webrtc.py"],
+      "tests": ["tests/test_navigation_sensors.py", "tests/test_native_live_acceptance.py"],
+      "acceptance": ["scripts/verify_native_go2_navigation.py", "docs/native-navigation-live-acceptance.md"],
+      "external_gates": ["go2_read_only_sensor_report", "go2_live_motion_suite"]
+    },
+    {
+      "id": "mapping_storage",
+      "requirement": "Point filtering, sparse voxel map, occupancy/costmap, inflation, free-space carving, bounded capacity and atomic versioned persistence",
+      "implementation": ["robot_brain/navigation/grid.py", "robot_brain/navigation/map_store.py"],
+      "tests": ["tests/test_native_navigation.py", "tests/test_native_map_store.py", "tests/test_navigation_replay.py"],
+      "acceptance": ["scripts/verify_native_mapping_replay.py"],
+      "external_gates": ["go2_mapping_replay"]
+    },
+    {
+      "id": "planning_control",
+      "requirement": "Safe goal search, A*, path clearance, following, dynamic stop/replan, arrival and final yaw",
+      "implementation": ["robot_brain/navigation/planner.py", "robot_brain/navigation/native_go2.py", "robot_brain/navigation/motion_safety.py"],
+      "tests": ["tests/test_native_navigation.py", "tests/test_native_goal_validator.py", "tests/test_native_motion_safety.py"],
+      "acceptance": ["scripts/verify_native_go2_navigation.py", "scripts/summarize_native_go2_acceptance.py"],
+      "external_gates": ["go2_live_motion_suite"]
+    },
+    {
+      "id": "failure_arbitration",
+      "requirement": "Cancel, estop, timeout, no path, localization loss, stale sensors, no progress and teleop ownership arbitration",
+      "implementation": ["robot_brain/navigation/native_go2.py", "robot_brain/teleop/session.py", "robot_brain/control/server.py"],
+      "tests": ["tests/test_navigation_control_arbitration.py", "tests/test_teleop_session.py", "tests/test_control_grpc.py", "tests/test_service.py", "tests/test_native_navigation.py"],
+      "acceptance": ["docs/native-navigation-live-acceptance.md", "scripts/verify_native_go2_arbitration.py"],
+      "external_gates": ["go2_live_motion_suite", "go2_live_teleop_estop_arbitration"]
+    },
+    {
+      "id": "relocalization_global_navigation",
+      "requirement": "Initial/global bounded relocalization, quality gate, map-to-odom, merge and persistent absolute goals",
+      "implementation": ["robot_brain/navigation/relocalization.py", "robot_brain/navigation/map_store.py", "robot_brain/navigation/native_go2.py"],
+      "tests": ["tests/test_native_relocalization.py", "tests/test_native_provider_relocalization.py", "tests/test_navigation_replay.py"],
+      "acceptance": ["scripts/verify_native_mapping_replay.py", "docs/native-navigation-mapping-replay-acceptance.md"],
+      "external_gates": ["go2_relocalization_replay"]
+    },
+    {
+      "id": "pose_graph_loop_closure",
+      "requirement": "Scan-verified loop constraints, bounded PGO, correction quality gates and map-frame isolation",
+      "implementation": ["robot_brain/navigation/pose_graph.py", "robot_brain/navigation/native_go2.py"],
+      "tests": ["tests/test_native_pose_graph.py", "tests/test_navigation_replay.py"],
+      "acceptance": ["scripts/verify_native_mapping_replay.py", "docs/native-navigation-mapping-replay-acceptance.md"],
+      "external_gates": ["go2_closed_loop_replay"]
+    },
+    {
+      "id": "frontier_exploration",
+      "requirement": "Frontier extraction/scoring/blacklist, information-gain termination and cancelable exploration",
+      "implementation": ["robot_brain/navigation/frontier.py", "robot_brain/navigation/exploration.py"],
+      "tests": ["tests/test_native_frontier.py", "tests/test_native_exploration.py"],
+      "acceptance": ["docs/native-navigation-exploration-patrol-acceptance.md", "scripts/analyze_native_navigation.py"],
+      "external_gates": ["go2_frontier_exploration_trace"]
+    },
+    {
+      "id": "patrol_coverage",
+      "requirement": "Coverage/frontier/random/least-visited routes and cancelable multi-cycle execution",
+      "implementation": ["robot_brain/navigation/patrol.py", "robot_brain/navigation/patrol_controller.py"],
+      "tests": ["tests/test_native_patrol.py", "tests/test_native_patrol_controller.py"],
+      "acceptance": ["docs/native-navigation-exploration-patrol-acceptance.md", "scripts/analyze_native_navigation.py"],
+      "external_gates": ["go2_four_strategy_patrol_traces"]
+    },
+    {
+      "id": "visual_navigation",
+      "requirement": "BBox goals, conservative target matching and continuous 2D/3D visual servo with safe reacquisition",
+      "implementation": ["robot_brain/navigation/visual_navigation.py", "robot_brain/navigation/visual_controller.py"],
+      "tests": ["tests/test_native_visual_navigation.py", "tests/test_native_visual_controller.py"],
+      "acceptance": ["docs/native-navigation-visual-servo-acceptance.md", "scripts/analyze_native_navigation.py"],
+      "external_gates": ["go2_visual_servo_trace"]
+    },
+    {
+      "id": "terrain_mls_tare",
+      "requirement": "Rolling terrain map, MLS planning, safety overlays, 3D execution and TARE-style exploration",
+      "implementation": ["robot_brain/navigation/terrain3d.py", "robot_brain/navigation/terrain_controller.py", "robot_brain/navigation/terrain_exploration.py"],
+      "tests": ["tests/test_native_terrain3d.py", "tests/test_native_terrain_controller.py", "tests/test_native_terrain_exploration.py", "tests/test_native_terrain_replay_acceptance.py"],
+      "acceptance": ["scripts/verify_native_terrain3d.py", "docs/native-navigation-terrain3d-acceptance.md", "docs/evidence/2026-08-04-unity-terrain3d-verification.json"],
+      "external_gates": ["go2_mid360_terrain_replay", "go2_terrain_execution_trace", "go2_tare_exploration_trace"]
+    },
+    {
+      "id": "diagnostics_replay",
+      "requirement": "Structured state/failures, JSONL trace, immutable manifests, sensor replay and offline reports",
+      "implementation": ["robot_brain/navigation/diagnostics.py", "robot_brain/navigation/replay.py"],
+      "tests": ["tests/test_navigation_diagnostics.py", "tests/test_navigation_replay.py"],
+      "acceptance": ["scripts/analyze_native_navigation.py", "scripts/verify_native_navigation_offline.py"],
+      "external_gates": []
+    },
+    {
+      "id": "runtime_integration",
+      "requirement": "NavigationClient integration with skills, tools, memory, safety, teleop, service and explicit live/motion gates",
+      "implementation": ["robot_brain/navigation/base.py", "robot_brain/runtime/loop.py", "robot_brain/service/runner.py", "robot_brain/skills/builtin/native_navigation.py", "robot_brain/tools/builtin/native_navigation.py"],
+      "tests": ["tests/test_native_navigation_skills.py", "tests/test_native_navigation_tools.py", "tests/test_navigation_capability.py", "tests/test_spatial_memory.py", "tests/test_control_grpc.py", "tests/test_service.py", "tests/test_native_dependency_isolation.py"],
+      "acceptance": ["scripts/verify_native_navigation_offline.py", "scripts/audit_dimos_navigation_extraction.py"],
+      "external_gates": ["native_service_integration_report"]
+    }
+  ]
+}

@@ -31,6 +31,10 @@ python examples\run_service.py
 http://127.0.0.1:8000
 ```
 
+控制台中央的 **Navigation Map** 标签会从同一个 robot-brain 运行时实时显示
+costmap、障碍膨胀、A* 路径、实际轨迹、机器人位姿、目标、控制速度和安全事件；
+它不会额外占用 Go2 WebRTC 连接，也不提供绕过安全门的运动按钮。
+
 也可以在安装后直接运行：
 
 ```powershell
@@ -100,13 +104,21 @@ RDB_UNITREE_ENABLE_MOTION=true python -m examples.run_unitree_smoke \
 
 调试时可缩短 Level 0 只读观察时长，例如 `--level0-seconds 10`（正式验收默认 60 秒）。任一级失败会立即停止，不会进入下一级。
 
-安全要点：`RDB_UNITREE_DRY_RUN=true`（默认）、`RDB_UNITREE_ENABLE_MOTION=false`（默认）；真实平移需同时 `--live` 与 motion gate。MCF 固件上前进/侧移走 Move(1008)，含转向（含 W+D 弧线）走虚拟摇杆通道，详见第九次迭代文档。
+安全要点：`RDB_UNITREE_DRY_RUN=true`（默认）、`RDB_UNITREE_ENABLE_MOTION=false`（默认）；真实平移需同时 `--live` 与 motion gate。MCF 固件上纯平移/纯旋转走 Move(1008)，平移与转向组合的 W+D 弧线走虚拟摇杆通道，详见第九次迭代文档。
 
 **感知桥接（第十次迭代）：** 设置 `RDB_PERCEPTION=unitree` 后，Go2 的真实 sport mode、error_code、速度、IMU 姿态、站立/运动状态会通过 `UnitreePerceptionAdapter` 注入 `WorldState.robot_self_state`，进入认知链路（FastReflex / LLM / 技能均可读取）。不影响默认 mock 路径。真机验证方式：
 
 ```bash
 RDB_ROBOT=unitree RDB_UNITREE_TRANSPORT=webrtc RDB_PERCEPTION=unitree \
 RDB_UNITREE_DRY_RUN=true RDB_UNITREE_ROBOT_IP=<ip> \
+python -m examples.run_service
+```
+
+使用原生导航 Viewer 时再设置：
+
+```bash
+export RDB_NAVIGATION_BACKEND=native_go2
+export RDB_UNITREE_LIDAR_STREAM=true
 python -m examples.run_service
 ```
 
@@ -131,6 +143,8 @@ RDB_ROBOT=unitree RDB_PERCEPTION=unitree python -m examples.run_service
 | --- | --- | --- |
 | `GET` | `/health` | 健康检查 |
 | `GET` | `/api/status` | 查询服务、世界状态和任务 |
+| `GET` | `/api/navigation/snapshot` | 查询只读导航地图、路径、轨迹和传感器摘要 |
+| `WS` | `/ws/navigation` | 订阅 4 Hz 原生导航 Viewer 数据 |
 | `GET` | `/api/tasks` | 查询任务列表 |
 | `GET` | `/api/tasks/{task_id}` | 查询单个任务 |
 | `POST` | `/api/tasks` | 提交任务 |
@@ -199,6 +213,14 @@ $env:RDB_MEMORY_DB = "D:\robot-data\robot_brain.sqlite3"
 | `RDB_UNITREE_ROBOT_IP` | 空 | Go2 WebRTC LAN IP（亦读 `DIMOS_ROBOT_IP` / `ROBOT_IP`） |
 | `RDB_UNITREE_DRY_RUN` | `true` | `false` 才允许向真机下发（仍受 motion gate 约束） |
 | `RDB_UNITREE_ENABLE_MOTION` | `false` | 真实姿态/平移硬安全门；`stop` 在已连接时始终允许 |
+| `RDB_NAVIGATION_BACKEND` | `auto` | 导航后端；`native_go2` 使用 robot-brain 自有 LiDAR→costmap→A*→重规划链路，不依赖 DIMOS/Nav2 |
+| `RDB_NATIVE_NAV_MAP_SIZE_M` | `7.0` | 原生 Go2 局部规划窗口边长（米） |
+| `RDB_NATIVE_NAV_RESOLUTION_M` | `0.10` | 原生 costmap/voxel map 分辨率（米） |
+| `RDB_NATIVE_NAV_ROBOT_RADIUS_M` | `0.30` | 障碍膨胀使用的 Go2 安全半径（米） |
+| `RDB_NATIVE_NAV_TRACE_PATH` | 空 | 设置后持久记录原生导航 JSONL trace |
+| `RDB_NATIVE_NAV_POSE_GRAPH_ENABLED` | `false` | 启用实验性在线闭环校正；只影响全局建图/定位坐标，局部运动仍使用原始 odom；现场验证前保持关闭 |
+| `RDB_NATIVE_NAV_MAX_ACCELERATION_MPS2` | `1.0` | 原生导航平面速度矢量的最大加速度（m/s²） |
+| `RDB_UNITREE_MOTION_MODE` | `mcf` | Go2 运动控制器；仅 `mcf` 注册需确认的三维地形运动技能，其他模式仍保留只读三维规划 |
 | `RDB_VLM_ENABLED` | `false` | 本地 VLM 可通行性 Hint 总开关（默认关，不影响 mock/CI） |
 | `RDB_VLM_BASE_URL` | `http://10.10.197.175:8080` | 局域网 Qwen3-VL 服务地址 |
 | `RDB_VLM_MODEL` | `/Users/dijia/models/Qwen3-VL-8B-4bit` | 服务端 model 字段 |

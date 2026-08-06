@@ -468,6 +468,22 @@ class DriveMoveTests(unittest.IsolatedAsyncioTestCase):
         ids = [c.args[1]["api_id"] for c in pub.await_args_list]
         self.assertIn(_SPORT_API_ID["switch_joystick"], ids)
         self.assertIn(_SPORT_API_ID["speed_level"], ids)
+        speed_calls = [
+            c.args[1] for c in pub.await_args_list
+            if c.args[1].get("api_id") == _SPORT_API_ID["speed_level"]
+        ]
+        self.assertEqual({"data": 2}, speed_calls[-1].get("parameter"))
+
+    async def test_enable_omni_teleop_respects_speed_level_setting(self) -> None:
+        transport, conn = connected_transport(unitree_speed_level=4)
+        await transport.connect()
+        await transport.enable_omni_teleop()
+        pub = conn.datachannel.pub_sub.publish_request_new
+        speed_calls = [
+            c.args[1] for c in pub.await_args_list
+            if c.args[1].get("api_id") == _SPORT_API_ID["speed_level"]
+        ]
+        self.assertEqual({"data": 4}, speed_calls[-1].get("parameter"))
 
     async def test_forward_plus_turn_uses_joystick_not_move(self) -> None:
         await self.transport.send_command(
@@ -495,6 +511,20 @@ class DriveMoveTests(unittest.IsolatedAsyncioTestCase):
             c for c in move_calls if _move_params_from_call(c) != {"x": 0.0, "y": 0.0, "z": 0.0}
         ]
         self.assertEqual(non_zero_moves, [])
+
+    async def test_pure_yaw_uses_move_api_on_mcf(self) -> None:
+        await self.transport.send_command(
+            UnitreeCommand(
+                action="drive",
+                parameters={"vyaw": -0.3, "duration": 0.0},
+            )
+        )
+        non_zero_moves = [
+            call for call in _move_pub_calls(self.pub)
+            if _move_params_from_call(call) != {"x": 0.0, "y": 0.0, "z": 0.0}
+        ]
+        self.assertGreaterEqual(len(non_zero_moves), 1)
+        self.assertAlmostEqual(_move_params_from_call(non_zero_moves[0])["z"], -0.3)
 
 
 class MotionLeaseTests(unittest.IsolatedAsyncioTestCase):

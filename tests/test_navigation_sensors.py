@@ -15,6 +15,7 @@ class _SensorTransport(FakeUnitreeTransport):
         frame_id: str = "base_link",
         cloud_age: float = 0.1,
         origin_xyz=None,
+        points=((0.5, 0.0, 0.2),),
     ) -> None:
         super().__init__(UnitreeState(
             connected=True,
@@ -27,10 +28,11 @@ class _SensorTransport(FakeUnitreeTransport):
         self.frame_id = frame_id
         self.cloud_age = cloud_age
         self.origin_xyz = origin_xyz
+        self.points = points
 
     def read_lidar_snapshot(self) -> PointCloudSnapshot:
         return PointCloudSnapshot(
-            points_xyz=((0.5, 0.0, 0.2),),
+            points_xyz=tuple(self.points),
             frame_id=self.frame_id,
             sensor_timestamp=10.0,
             received_monotonic=20.0,
@@ -135,3 +137,23 @@ class NavigationSensorProviderTests(unittest.IsolatedAsyncioTestCase):
             transport, require_authoritative_odom=False
         ).get_snapshot()
         self.assertTrue(fallback.ready)
+
+    async def test_non_finite_odometry_fails_closed(self) -> None:
+        transport = _SensorTransport()
+        transport._state.position = Position(x=float("nan"), y=0.0)
+        await transport.connect()
+        snapshot = await UnitreeNavigationSensorProvider(transport).get_snapshot()
+        self.assertFalse(snapshot.ready)
+        self.assertEqual("invalid_odometry", snapshot.reason)
+
+    async def test_non_finite_cloud_points_are_filtered_and_empty_frame_rejected(self) -> None:
+        transport = _SensorTransport(points=((float("nan"), 0.0, 0.2),))
+        await transport.connect()
+        snapshot = await UnitreeNavigationSensorProvider(transport).get_snapshot()
+        self.assertFalse(snapshot.ready)
+        self.assertEqual("invalid_pointcloud", snapshot.reason)
+        self.assertEqual(0, snapshot.pointcloud.point_count)  # type: ignore[union-attr]
+
+    def test_invalid_sensor_limits_are_rejected(self) -> None:
+        with self.assertRaisesRegex(ValueError, "freshness"):
+            UnitreeNavigationSensorProvider(_SensorTransport(), max_pose_age_s=-1.0)

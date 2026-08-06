@@ -538,6 +538,75 @@ body {
   text-overflow: ellipsis;
 }
 
+/* ── Navigation viewer ──────────────────────────────── */
+.center-tabs { display:flex; gap:14px; border-bottom:1px solid var(--border-light); }
+.center-tab {
+  border:0; border-bottom:2px solid transparent; background:transparent;
+  padding:0 0 8px; color:var(--text-faint); font:600 .65rem var(--ff-mono);
+  letter-spacing:.1em; text-transform:uppercase; cursor:pointer;
+}
+.center-tab[aria-selected="true"] { color:var(--signal); border-color:var(--signal); }
+.center-view[hidden] { display:none; }
+.navigation-view { min-height:0; flex:1; display:flex; flex-direction:column; gap:10px; }
+.navigation-toolbar { display:flex; flex-wrap:wrap; align-items:center; gap:12px; }
+.navigation-toolbar label {
+  display:flex; align-items:center; gap:5px; color:var(--text-muted);
+  font:500 .63rem var(--ff-mono);
+}
+.navigation-toolbar input { accent-color:var(--signal); }
+.navigation-mode {
+  display:inline-flex; padding:2px; gap:2px; border:1px solid var(--border);
+  border-radius:var(--radius-sm); background:var(--bg-panel);
+}
+.navigation-mode button {
+  border:0; border-radius:3px; padding:4px 8px; cursor:pointer; background:transparent;
+  color:var(--text-faint); font:600 .59rem var(--ff-mono); letter-spacing:.03em;
+}
+.navigation-mode button[aria-pressed="true"] { color:#fff; background:var(--signal); }
+.navigation-status { margin-left:auto; color:var(--text-faint); font:500 .62rem var(--ff-mono); }
+.navigation-keys { display:flex;align-items:center;gap:4px;color:var(--text-faint);font:500 .58rem var(--ff-mono); }
+.navigation-key { min-width:20px;padding:2px 4px;text-align:center;border:1px solid var(--border);border-radius:3px;background:var(--bg); }
+.navigation-key.is-active { color:#fff;background:var(--signal);border-color:var(--signal); }
+.navigation-posture {
+  border:1px solid var(--border); border-radius:3px; background:var(--bg);
+  color:var(--text-muted); font:600 .58rem var(--ff-mono); padding:3px 7px; cursor:pointer;
+}
+.navigation-posture:hover { border-color:var(--signal); color:var(--signal); }
+.navigation-posture:disabled { opacity:.45; cursor:default; }
+.navigation-canvas-wrap {
+  position:relative; flex:1; min-height:390px; overflow:hidden;
+  border:1px solid var(--border); border-radius:var(--radius-md); background:linear-gradient(#17191f 0%,#242832 48%,#101419 100%);
+}
+#navigation-canvas,#navigation-webgl-canvas { position:absolute;inset:0;display:block;width:100%;height:100%; }
+#navigation-webgl-canvas { z-index:1; }
+#navigation-canvas { z-index:2;pointer-events:auto; }
+.navigation-overlay {
+  position:absolute; z-index:4; overflow:hidden; border:1px solid rgba(255,255,255,.7);
+  border-radius:var(--radius-md); background:rgba(15,23,42,.88); box-shadow:var(--shadow-md);
+}
+.navigation-camera { left:12px; top:12px; width:clamp(150px,27%,250px); aspect-ratio:16/10; }
+.navigation-camera img,.navigation-camera video { width:100%;height:100%;display:block;object-fit:cover; }
+.navigation-camera img[hidden] { display:none; }
+.navigation-camera video[hidden] { display:none; }
+.navigation-camera span { position:absolute;inset:0;display:grid;place-items:center;padding:10px;color:#cbd5e1;font:500 .6rem var(--ff-mono);text-align:center; }
+.navigation-minimap { right:12px;top:12px;width:clamp(150px,27%,250px);aspect-ratio:1;cursor:zoom-in;background:#fff; }
+.navigation-minimap canvas { width:100%;height:100%;display:block; }
+.navigation-minimap.is-expanded { inset:12px;width:auto;height:auto;aspect-ratio:auto;cursor:crosshair;z-index:8; }
+.navigation-minimap__hint { position:absolute;right:7px;bottom:5px;color:#475569;font:500 .55rem var(--ff-mono);pointer-events:none; }
+.navigation-minimap__close {
+  display:none;position:absolute;left:12px;top:12px;z-index:2;border:0;border-radius:var(--radius-sm);
+  padding:8px 11px;background:#0f172a;color:#fff;font:600 .65rem var(--ff-mono);cursor:pointer;
+}
+.navigation-minimap.is-expanded .navigation-minimap__close { display:block; }
+.navigation-empty {
+  position:absolute; inset:0; display:grid; place-items:center; pointer-events:none;
+  color:var(--text-faint); font:500 .72rem var(--ff-mono); text-align:center; padding:24px;
+}
+.navigation-metrics { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:7px; }
+.navigation-metric { padding:8px 9px; border:1px solid var(--border-light); border-radius:var(--radius-sm); }
+.navigation-metric span { display:block; color:var(--text-faint); font:500 .55rem var(--ff-mono); text-transform:uppercase; }
+.navigation-metric strong { display:block; margin-top:2px; font:500 .75rem var(--ff-mono); overflow:hidden; text-overflow:ellipsis; }
+
 /* ── Estop badge ─────────────────────────────────────── */
 .estop-badge {
   display: inline-flex;
@@ -590,6 +659,7 @@ body {
   html { font-size: 13px; }
   .console { grid-template-columns: 1fr; }
   .telemetry-row { grid-template-columns: 1fr; }
+  .navigation-metrics { grid-template-columns:1fr 1fr; }
 }
 </style>
 </head>
@@ -693,6 +763,12 @@ body {
 
   <!-- Center Panel: Cognition Pipeline + Decision -->
   <section class="panel panel--center" id="panel-center">
+    <div class="center-tabs" role="tablist" aria-label="Center view">
+      <button class="center-tab" id="tab-cognition" role="tab" aria-selected="true">Cognition</button>
+      <button class="center-tab" id="tab-navigation" role="tab" aria-selected="false">Navigation Map</button>
+    </div>
+
+    <div class="center-view" id="view-cognition" role="tabpanel">
     <div class="panel__header">Cognition Pipeline</div>
 
     <div class="pipeline" id="pipeline">
@@ -708,6 +784,55 @@ body {
     <div class="panel__section">
       <div class="panel__section-title">Latest Decision</div>
       <div class="decision-block" id="decision-block">No decisions recorded yet.</div>
+    </div>
+    </div>
+
+    <div class="center-view navigation-view" id="view-navigation" role="tabpanel" hidden>
+      <div class="navigation-toolbar">
+        <span class="navigation-mode" aria-label="Map view">
+          <button type="button" data-nav-mode="3d" aria-pressed="true">3D VOXEL</button>
+          <button type="button" data-nav-mode="2d" aria-pressed="false">2D COSTMAP</button>
+          <button type="button" id="navigation-follow" aria-pressed="true">DOG VIEW</button>
+        </span>
+        <label><input type="checkbox" data-nav-layer="free" checked> free</label>
+        <label><input type="checkbox" data-nav-layer="cost" checked> inflation</label>
+        <label><input type="checkbox" data-nav-layer="occupied" checked> obstacles</label>
+        <label><input type="checkbox" data-nav-layer="path" checked> plan</label>
+        <label><input type="checkbox" data-nav-layer="trajectory" checked> trajectory</label>
+        <span class="navigation-keys" id="navigation-keys" title="Hold keys to drive; release to stop">
+          <span class="navigation-key" data-drive-key="q">Q</span><span class="navigation-key" data-drive-key="w">W</span><span class="navigation-key" data-drive-key="e">E</span>
+          <span class="navigation-key" data-drive-key="a">A</span><span class="navigation-key" data-drive-key="s">S</span><span class="navigation-key" data-drive-key="d">D</span>
+        </span>
+        <span class="navigation-keys" id="navigation-posture-keys" title="Posture shortcuts: U stand / B balance / L lie down">
+          <button type="button" class="navigation-posture" data-posture="stand_up">STAND U</button>
+          <button type="button" class="navigation-posture" data-posture="balance_stand">BALANCE B</button>
+          <button type="button" class="navigation-posture" data-posture="stand_down">LIE DOWN L</button>
+        </span>
+        <span class="navigation-status" id="navigation-status">offline</span>
+      </div>
+      <div class="navigation-canvas-wrap" id="navigation-canvas-wrap">
+        <canvas id="navigation-webgl-canvas" aria-label="GPU rendered voxel map"></canvas>
+        <canvas id="navigation-canvas" aria-label="Live 3D voxel navigation map"></canvas>
+        <div class="navigation-overlay navigation-camera">
+          <video id="navigation-camera-video" autoplay muted playsinline hidden></video>
+          <img id="navigation-camera-frame" alt="Go2 front camera" hidden>
+          <span id="navigation-camera-status">Waiting for camera…</span>
+        </div>
+        <div class="navigation-overlay navigation-minimap" id="navigation-minimap" title="Click to expand map">
+          <canvas id="navigation-minimap-canvas" aria-label="Clickable 2D navigation map"></canvas>
+          <button type="button" class="navigation-minimap__close" id="navigation-minimap-close">← BACK TO 3D</button>
+          <span class="navigation-minimap__hint" id="navigation-minimap-hint">CLICK TO EXPAND</span>
+        </div>
+        <div class="navigation-empty" id="navigation-empty">Waiting for native navigation data…</div>
+      </div>
+      <div class="navigation-metrics">
+        <div class="navigation-metric"><span>State</span><strong id="nav-state">—</strong></div>
+        <div class="navigation-metric"><span>Replans</span><strong id="nav-replans">—</strong></div>
+        <div class="navigation-metric"><span>Pose</span><strong id="nav-pose">—</strong></div>
+        <div class="navigation-metric"><span>Clearance</span><strong id="nav-clearance">—</strong></div>
+        <div class="navigation-metric"><span>LiDAR</span><strong id="nav-lidar">—</strong></div>
+        <div class="navigation-metric"><span>Command</span><strong id="nav-command">—</strong></div>
+      </div>
     </div>
   </section>
 
@@ -762,6 +887,632 @@ const STAGES = ['PERCEIVE', 'DECIDE', 'SELECT', 'VALIDATE', 'EXECUTE', 'OBSERVE'
 let currentStage = -1;
 let eventLog = [];
 const MAX_EVENTS = 50;
+let navigationSnapshot = null;
+const navigationLayers = { free:true, cost:true, occupied:true, path:true, trajectory:true };
+let navigationMode = '3d';
+let navigationCameraYaw = -0.72;
+let navigationZoom = 1;
+let navigationFollow = true;
+let navigationCameraCenter = null;
+let navigationSelectedGoal = null;
+let navigationLastDrawSignature = null;
+const navigationVoxelCache = new Map();
+let navigationViewActive = false;
+const navigationDriveKeys = new Set();
+// Keep the motion lease alive this long after the last key-up so a direction
+// change reuses the running velocity stream instead of rebuilding it.
+const DRIVE_RELEASE_GRACE_MS = 600;
+let navigationDriveTimer = null;
+let navigationDriveReleaseTimer = null;
+let navigationDriveRequestPending = false;
+let navigationDrivePendingFlush = false;
+let navigationDriveDesiredActive = false;
+let navigationCameraTimer = null;
+let navigationCameraInFlight = false;
+let navigationCameraPC = null;
+let navigationWS = null;
+
+function setupCenterTabs() {
+  const cognition = document.getElementById('view-cognition');
+  const navigation = document.getElementById('view-navigation');
+  const cognitionTab = document.getElementById('tab-cognition');
+  const navigationTab = document.getElementById('tab-navigation');
+  const select = (showNavigation) => {
+    navigationViewActive=showNavigation;
+    cognition.hidden = showNavigation;
+    navigation.hidden = !showNavigation;
+    cognitionTab.setAttribute('aria-selected', String(!showNavigation));
+    navigationTab.setAttribute('aria-selected', String(showNavigation));
+    sendNavigationView(showNavigation);
+    setNavigationCamera(showNavigation);
+    if (showNavigation) requestAnimationFrame(drawNavigation);
+    else stopKeyboardDrive({immediate:true});
+  };
+  cognitionTab.addEventListener('click', () => select(false));
+  navigationTab.addEventListener('click', () => select(true));
+  document.querySelectorAll('[data-nav-layer]').forEach(input => {
+    input.addEventListener('change', () => {
+      navigationLayers[input.dataset.navLayer] = input.checked;
+      drawNavigation();
+    });
+  });
+  document.querySelectorAll('[data-nav-mode]').forEach(button => {
+    button.addEventListener('click', () => {
+      navigationMode=button.dataset.navMode;
+      document.querySelectorAll('[data-nav-mode]').forEach(value =>
+        value.setAttribute('aria-pressed', String(value===button)));
+      document.getElementById('navigation-canvas').setAttribute('aria-label',
+        navigationMode==='3d' ? 'Live 3D voxel navigation map' : 'Live navigation costmap');
+      drawNavigation();
+    });
+  });
+  document.getElementById('navigation-follow').addEventListener('click', event=>{
+    navigationFollow=!navigationFollow;
+    event.currentTarget.setAttribute('aria-pressed',String(navigationFollow));
+    if (navigationFollow) navigationCameraCenter=null;
+    drawNavigation();
+  });
+  const minimap=document.getElementById('navigation-minimap');
+  const closeMiniMap=()=>{
+    minimap.classList.remove('is-expanded');
+    document.getElementById('navigation-minimap-hint').textContent='CLICK TO EXPAND';
+    requestAnimationFrame(drawNavigationMiniMap);
+  };
+  document.getElementById('navigation-minimap-close').addEventListener('click',event=>{
+    event.stopPropagation();closeMiniMap();
+  });
+  minimap.addEventListener('click', async event=>{
+    if (!minimap.classList.contains('is-expanded')) {
+      minimap.classList.add('is-expanded');
+      document.getElementById('navigation-minimap-hint').textContent='CLICK FREE SPACE · ESC TO CLOSE';
+      requestAnimationFrame(drawNavigationMiniMap); return;
+    }
+    const grid=navigationSnapshot?.costmap, canvas=document.getElementById('navigation-minimap-canvas');
+    if (!grid) return;
+    const rect=canvas.getBoundingClientRect(), map=miniMapGeometry(rect.width,rect.height,grid);
+    const x=grid.origin_x_m+(event.clientX-rect.left-map.ox)/map.scale;
+    const y=grid.origin_y_m+(map.oy+map.mapHeight*map.scale-(event.clientY-rect.top))/map.scale;
+    const col=Math.floor((x-grid.origin_x_m)/grid.resolution_m), row=Math.floor((y-grid.origin_y_m)/grid.resolution_m);
+    const key=`${col},${row}`, free=new Set((grid.known_free||[]).map(value=>value.join(',')));
+    const blocked=new Set((grid.occupied||[]).map(value=>value.join(',')));
+    if (!free.has(key) || blocked.has(key)) { document.getElementById('navigation-minimap-hint').textContent='SELECT KNOWN FREE SPACE'; return; }
+    navigationSelectedGoal={x_m:x,y_m:y}; drawNavigationMiniMap();
+    if (!window.confirm(`Navigate to ${x.toFixed(2)}, ${y.toFixed(2)} m?`)) return;
+    try {
+      const response=await fetch('/api/navigation/map-goal',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({x_m:x,y_m:y,confirm:'I_UNDERSTAND_MAP_NAVIGATION'})});
+      const payload=await response.json();
+      document.getElementById('navigation-minimap-hint').textContent=response.ok?'GOAL ACCEPTED':(payload.detail||'GOAL REJECTED');
+    } catch (_) { document.getElementById('navigation-minimap-hint').textContent='GOAL REQUEST FAILED'; }
+  });
+  document.addEventListener('keydown', event=>{
+    if (event.key==='Escape' && minimap.classList.contains('is-expanded')) {
+      event.stopImmediatePropagation();closeMiniMap();
+    }
+  },true);
+  const canvas=document.getElementById('navigation-canvas');
+  let dragging=false, previousX=0;
+  canvas.addEventListener('pointerdown', event=>{
+    if (navigationMode!=='3d') return;
+    dragging=true; previousX=event.clientX; canvas.setPointerCapture(event.pointerId);
+  });
+  canvas.addEventListener('pointermove', event=>{
+    if (!dragging) return;
+    navigationCameraYaw += (event.clientX-previousX)*.008; previousX=event.clientX; drawNavigation();
+  });
+  canvas.addEventListener('pointerup', ()=>{ dragging=false; });
+  canvas.addEventListener('wheel', event=>{
+    if (navigationMode!=='3d') return;
+    event.preventDefault(); navigationZoom=Math.max(.55,Math.min(2.2,navigationZoom*Math.exp(-event.deltaY*.001))); drawNavigation();
+  }, {passive:false});
+}
+
+function keyboardSetpoint() {
+  const has=key=>navigationDriveKeys.has(key);
+  return {
+    vx:(has('w')?0.35:0)+(has('s')?-0.35:0),
+    vy:(has('a')?0.35:0)+(has('d')?-0.35:0),
+    vyaw:(has('q')?0.80:0)+(has('e')?-0.80:0),
+  };
+}
+
+async function sendKeyboardDrive(active=true) {
+  navigationDriveDesiredActive=active;
+  // Only one request may be in flight; the newest key state is flushed as soon
+  // as it returns, so a direction change is never delayed by a stale POST.
+  if (navigationDriveRequestPending) { navigationDrivePendingFlush=true; return; }
+  const requestedActive=navigationDriveDesiredActive;
+  navigationDriveRequestPending=true;
+  const setpoint=keyboardSetpoint();
+  try {
+    const response=await fetch('/api/teleop/keyboard',{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(requestedActive?{active:true,...setpoint}:{active:false}),
+    });
+    const payload=await response.json();
+    if(!response.ok||!payload.accepted)document.getElementById('navigation-status').textContent=payload.reason||payload.detail||'teleop rejected';
+  } catch (_) { document.getElementById('navigation-status').textContent='teleop offline'; }
+  finally {
+    navigationDriveRequestPending=false;
+    const flush=navigationDrivePendingFlush||navigationDriveDesiredActive!==requestedActive;
+    navigationDrivePendingFlush=false;
+    if(flush)void sendKeyboardDrive(navigationDriveDesiredActive);
+  }
+}
+
+async function sendPosture(posture) {
+  try {
+    const response=await fetch('/api/teleop/posture',{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({posture}),
+    });
+    const payload=await response.json();
+    document.getElementById('navigation-status').textContent=
+      response.ok?`posture: ${posture}`:(payload.detail||'posture rejected');
+  } catch (_) { document.getElementById('navigation-status').textContent='posture offline'; }
+}
+
+function renderDriveKeys() {
+  document.querySelectorAll('[data-drive-key]').forEach(value=>
+    value.classList.toggle('is-active',navigationDriveKeys.has(value.dataset.driveKey)));
+}
+
+function cancelDriveRelease() {
+  if(navigationDriveReleaseTimer)clearTimeout(navigationDriveReleaseTimer);
+  navigationDriveReleaseTimer=null;
+}
+
+// Releasing the lease tears down the 50Hz velocity stream, and rebuilding it
+// costs a few hundred ms — long enough to make W→S feel unresponsive. So a
+// key-up only sends a zero setpoint (the robot stops immediately) and the lease
+// is released later, unless another key arrives within the grace window.
+function stopKeyboardDrive({immediate=false}={}) {
+  navigationDriveKeys.clear();renderDriveKeys();
+  if(navigationDriveTimer){clearInterval(navigationDriveTimer);navigationDriveTimer=null;}
+  cancelDriveRelease();
+  if(immediate){void sendKeyboardDrive(false);return;}
+  void sendKeyboardDrive(true);
+  navigationDriveReleaseTimer=setTimeout(()=>{
+    navigationDriveReleaseTimer=null;
+    if(!navigationDriveKeys.size)void sendKeyboardDrive(false);
+  },DRIVE_RELEASE_GRACE_MS);
+}
+
+function setupKeyboardDrive() {
+  const allowed=new Set(['q','w','e','a','s','d']);
+  const postureKeys={'u':'stand_up','b':'balance_stand','l':'stand_down'};
+  document.querySelectorAll('[data-posture]').forEach(button=>{
+    button.addEventListener('click',()=>void sendPosture(button.dataset.posture));
+  });
+  document.addEventListener('keydown',event=>{
+    const key=event.key.toLowerCase();
+    const editing=['INPUT','TEXTAREA','SELECT'].includes(document.activeElement?.tagName);
+    if(!navigationViewActive||editing||event.metaKey||event.ctrlKey||event.altKey)return;
+    if(postureKeys[key]){event.preventDefault();void sendPosture(postureKeys[key]);return;}
+    if(!allowed.has(key))return;
+    event.preventDefault();
+    if(navigationDriveKeys.has(key))return;
+    cancelDriveRelease();
+    navigationDriveKeys.add(key);renderDriveKeys();void sendKeyboardDrive(true);
+    if(!navigationDriveTimer)navigationDriveTimer=setInterval(()=>void sendKeyboardDrive(true),120);
+  });
+  document.addEventListener('keyup',event=>{
+    const key=event.key.toLowerCase();if(!allowed.has(key)||!navigationDriveKeys.has(key))return;
+    event.preventDefault();navigationDriveKeys.delete(key);renderDriveKeys();
+    if(navigationDriveKeys.size)void sendKeyboardDrive(true);else stopKeyboardDrive();
+  });
+  window.addEventListener('blur',()=>stopKeyboardDrive({immediate:true}));
+  document.addEventListener('visibilitychange',()=>{
+    if(document.hidden)stopKeyboardDrive({immediate:true});
+  });
+  window.addEventListener('pagehide',()=>{
+    navigationDriveKeys.clear();
+    cancelDriveRelease();
+    if(navigationDriveTimer)clearInterval(navigationDriveTimer);
+    if(navigationCameraTimer)clearInterval(navigationCameraTimer);
+    navigator.sendBeacon(
+      '/api/teleop/keyboard',
+      new Blob([JSON.stringify({active:false})],{type:'application/json'}),
+    );
+  });
+}
+
+function drawNavigation() {
+  if (navigationMode==='3d') drawNavigation3D(); else drawNavigation2D();
+  drawNavigationMiniMap();
+}
+
+function miniMapGeometry(width,height,grid) {
+  const mapWidth=grid.width*grid.resolution_m, mapHeight=grid.height*grid.resolution_m;
+  const scale=Math.min((width-12)/mapWidth,(height-12)/mapHeight);
+  return {mapWidth,mapHeight,scale,ox:(width-mapWidth*scale)/2,oy:(height-mapHeight*scale)/2};
+}
+
+function drawNavigationMiniMap() {
+  const canvas=document.getElementById('navigation-minimap-canvas'), wrap=document.getElementById('navigation-minimap');
+  const grid=navigationSnapshot?.costmap;if (!canvas||!wrap||!grid||!wrap.clientWidth) return;
+  const ratio=Math.min(window.devicePixelRatio||1,1.25),width=wrap.clientWidth,height=wrap.clientHeight;
+  if (canvas.width!==Math.round(width*ratio)||canvas.height!==Math.round(height*ratio)) {canvas.width=Math.round(width*ratio);canvas.height=Math.round(height*ratio);}
+  const ctx=canvas.getContext('2d');ctx.setTransform(ratio,0,0,ratio,0,0);ctx.clearRect(0,0,width,height);
+  const {mapWidth,mapHeight,scale,ox,oy}=miniMapGeometry(width,height,grid),cell=grid.resolution_m*scale;
+  const gridCell=([col,row])=>[ox+col*cell,oy+(grid.height-row-1)*cell];
+  const world=(x,y)=>[ox+(x-grid.origin_x_m)*scale,oy+mapHeight*scale-(y-grid.origin_y_m)*scale];
+  ctx.fillStyle='#f8fafc';ctx.fillRect(ox,oy,mapWidth*scale,mapHeight*scale);
+  // 3D mode already shows free space as voxels — skip dense free-cell fill on the mini map.
+  if(navigationMode!=='3d'){
+    ctx.fillStyle='rgba(52,211,153,.25)';for(const value of grid.known_free||[]){const p=gridCell(value);ctx.fillRect(p[0],p[1],Math.ceil(cell),Math.ceil(cell));}
+  }
+  ctx.fillStyle='rgba(245,158,11,.32)';for(const value of grid.occupied||[]){const p=gridCell(value);ctx.fillRect(p[0],p[1],Math.ceil(cell),Math.ceil(cell));}
+  ctx.fillStyle='rgba(31,41,55,.82)';for(const value of (grid.raw_occupied?.length?grid.raw_occupied:grid.occupied)||[]){const p=gridCell(value);ctx.fillRect(p[0],p[1],Math.ceil(cell),Math.ceil(cell));}
+  const line=(values,color,w)=>{if(!values||values.length<2)return;ctx.beginPath();values.forEach((v,i)=>{const p=world(v.x_m,v.y_m);i?ctx.lineTo(p[0],p[1]):ctx.moveTo(p[0],p[1]);});ctx.strokeStyle=color;ctx.lineWidth=w;ctx.stroke();};
+  line(navigationSnapshot.path,'#7c3aed',2.5);line(navigationSnapshot.trajectory,'#16a34a',2);
+  const pose=navigationSnapshot.state?.pose;if(pose){const p=world(pose.x_m,pose.y_m);ctx.fillStyle='#dc2626';ctx.beginPath();ctx.arc(p[0],p[1],5,0,Math.PI*2);ctx.fill();}
+  if(navigationSelectedGoal){const p=world(navigationSelectedGoal.x_m,navigationSelectedGoal.y_m);ctx.strokeStyle='#7c3aed';ctx.lineWidth=2;ctx.beginPath();ctx.arc(p[0],p[1],8,0,Math.PI*2);ctx.stroke();}
+}
+
+function prepareNavigationCanvas() {
+  const canvas = document.getElementById('navigation-canvas');
+  const wrap = document.getElementById('navigation-canvas-wrap');
+  if (!canvas || !wrap || wrap.clientWidth === 0) return null;
+  const ratio = Math.min(window.devicePixelRatio || 1, 1.25);
+  const width = wrap.clientWidth, height = wrap.clientHeight;
+  const pixelWidth=Math.round(width*ratio), pixelHeight=Math.round(height*ratio);
+  if (canvas.width!==pixelWidth || canvas.height!==pixelHeight) {
+    canvas.width=pixelWidth; canvas.height=pixelHeight;
+  }
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(ratio,0,0,ratio,0,0); ctx.clearRect(0,0,width,height);
+  return {canvas,ctx,width,height};
+}
+
+function drawNavigation2D() {
+  document.getElementById('navigation-webgl-canvas').style.display='none';
+  const prepared=prepareNavigationCanvas(); if (!prepared) return;
+  const {ctx,width,height}=prepared;
+  const data = navigationSnapshot, grid = data?.costmap;
+  const empty = document.getElementById('navigation-empty');
+  if (!data?.available || !grid) {
+    empty.style.display = 'grid';
+    empty.textContent = data?.reason || data?.map_reason || 'Waiting for native navigation data…';
+    return;
+  }
+  empty.style.display = 'none';
+  const css = getComputedStyle(document.documentElement);
+  const mapWidth = grid.width * grid.resolution_m;
+  const mapHeight = grid.height * grid.resolution_m;
+  const scale = Math.min((width - 28) / mapWidth, (height - 28) / mapHeight);
+  const ox = (width - mapWidth * scale) / 2, oy = (height - mapHeight * scale) / 2;
+  const cell = grid.resolution_m * scale;
+  const world = (x, y) => [
+    ox + (x - grid.origin_x_m) * scale,
+    oy + mapHeight * scale - (y - grid.origin_y_m) * scale,
+  ];
+  const gridCell = ([col,row]) => [ox + col*cell, oy + (grid.height-row-1)*cell];
+  ctx.fillStyle = css.getPropertyValue('--bg').trim();
+  ctx.fillRect(ox, oy, mapWidth*scale, mapHeight*scale);
+  if (navigationLayers.free) {
+    ctx.fillStyle = 'rgba(22,163,74,.10)';
+    for (const value of grid.known_free || []) { const [x,y]=gridCell(value); ctx.fillRect(x,y,Math.ceil(cell),Math.ceil(cell)); }
+  }
+  if (navigationLayers.cost && grid.traversal_cost_values?.length) {
+    for (let i=0; i<grid.traversal_cost_values.length; i++) {
+      const value=grid.traversal_cost_values[i]; if (!value) continue;
+      const [x,y]=gridCell([i%grid.width,Math.floor(i/grid.width)]);
+      ctx.fillStyle=`rgba(245,158,11,${Math.min(.48,value/210)})`;
+      ctx.fillRect(x,y,Math.ceil(cell),Math.ceil(cell));
+    }
+  }
+  if (navigationLayers.cost) {
+    ctx.fillStyle = 'rgba(245,158,11,.28)';
+    for (const value of grid.occupied || []) { const [x,y]=gridCell(value); ctx.fillRect(x,y,Math.ceil(cell),Math.ceil(cell)); }
+  }
+  if (navigationLayers.occupied) {
+    ctx.fillStyle = 'rgba(31,41,55,.82)';
+    const raw=(grid.raw_occupied?.length ? grid.raw_occupied : grid.occupied) || [];
+    for (const value of raw) { const [x,y]=gridCell(value); ctx.fillRect(x,y,Math.ceil(cell),Math.ceil(cell)); }
+  }
+  const line = (points, color, lineWidth) => {
+    if (!points || points.length < 2) return;
+    ctx.beginPath(); points.forEach((p,i)=>{ const [x,y]=world(p.x_m,p.y_m); i?ctx.lineTo(x,y):ctx.moveTo(x,y); });
+    ctx.strokeStyle=color; ctx.lineWidth=lineWidth; ctx.lineJoin='round'; ctx.lineCap='round'; ctx.stroke();
+  };
+  if (navigationLayers.trajectory) line(data.trajectory, css.getPropertyValue('--success').trim(), 2.5);
+  if (navigationLayers.path) line(data.path, css.getPropertyValue('--signal').trim(), 3);
+  const goal=data.goal;
+  if (goal?.target_x_m != null) {
+    const [x,y]=world(goal.target_x_m,goal.target_y_m); ctx.strokeStyle=css.getPropertyValue('--signal').trim(); ctx.lineWidth=2;
+    ctx.beginPath(); ctx.arc(x,y,6,0,Math.PI*2); ctx.stroke(); ctx.beginPath(); ctx.moveTo(x-9,y);ctx.lineTo(x+9,y);ctx.moveTo(x,y-9);ctx.lineTo(x,y+9);ctx.stroke();
+  }
+  const pose=data.state?.pose;
+  if (pose) {
+    const [x,y]=world(pose.x_m,pose.y_m), yaw=-pose.yaw_degrees*Math.PI/180;
+    ctx.save(); ctx.translate(x,y); ctx.rotate(yaw); ctx.fillStyle=css.getPropertyValue('--danger').trim();
+    ctx.beginPath(); ctx.moveTo(11,0);ctx.lineTo(-8,-7);ctx.lineTo(-5,0);ctx.lineTo(-8,7);ctx.closePath();ctx.fill();ctx.restore();
+  }
+  ctx.strokeStyle=css.getPropertyValue('--border').trim();ctx.lineWidth=1;ctx.strokeRect(ox,oy,mapWidth*scale,mapHeight*scale);
+}
+
+let voxelGL=null;
+function compileVoxelShader(gl,type,source){
+  const shader=gl.createShader(type);gl.shaderSource(shader,source);gl.compileShader(shader);
+  if(!gl.getShaderParameter(shader,gl.COMPILE_STATUS))throw new Error(gl.getShaderInfoLog(shader));
+  return shader;
+}
+function initializeVoxelGL(){
+  const canvas=document.getElementById('navigation-webgl-canvas'),gl=canvas.getContext('webgl2',{alpha:true,antialias:false});
+  if(!gl)return null;
+  const vertex=`#version 300 es
+    precision highp float;
+    layout(location=0) in vec3 aVertex;
+    layout(location=1) in vec4 aInstance;
+    layout(location=2) in vec3 aColor;
+    uniform vec2 uPose;uniform float uYaw;uniform vec2 uViewport;uniform float uFocal;
+    out vec3 vColor;out float vShade;
+    void main(){
+      vec3 world=aInstance.xyz+aVertex*aInstance.w;
+      vec2 delta=world.xy-uPose;
+      float c=cos(uYaw),s=sin(uYaw);
+      float right=-delta.x*s+delta.y*c;
+      float forward=delta.x*c+delta.y*s+1.45;
+      float up=world.z-.72;
+      float pc=cos(.18),ps=sin(.18);
+      float depth=forward*pc-up*ps;
+      float viewUp=up*pc+forward*ps;
+      float ndcX=(right/depth*uFocal)/(uViewport.x*.5);
+      float ndcY=.16+(viewUp/depth*uFocal)/(uViewport.y*.5);
+      float ndcZ=clamp((depth-.1)/30.0*2.0-1.0,-1.0,1.0);
+      gl_Position=vec4(ndcX*depth,ndcY*depth,ndcZ*depth,depth);
+      vColor=aColor;vShade=.72+aVertex.z*.22+aVertex.x*.08;
+    }`;
+  const fragment=`#version 300 es
+    precision mediump float;in vec3 vColor;in float vShade;out vec4 color;
+    void main(){color=vec4(vColor*vShade,1.0);}`;
+  const program=gl.createProgram();gl.attachShader(program,compileVoxelShader(gl,gl.VERTEX_SHADER,vertex));gl.attachShader(program,compileVoxelShader(gl,gl.FRAGMENT_SHADER,fragment));gl.linkProgram(program);
+  if(!gl.getProgramParameter(program,gl.LINK_STATUS))throw new Error(gl.getProgramInfoLog(program));
+  const vertices=[];
+  const quad=(a,b,c,d)=>vertices.push(...a,...b,...c,...a,...c,...d);
+  quad([-.5,-.5,.5],[.5,-.5,.5],[.5,.5,.5],[-.5,.5,.5]);quad([-.5,.5,-.5],[.5,.5,-.5],[.5,-.5,-.5],[-.5,-.5,-.5]);
+  quad([-.5,-.5,-.5],[.5,-.5,-.5],[.5,-.5,.5],[-.5,-.5,.5]);quad([.5,.5,-.5],[-.5,.5,-.5],[-.5,.5,.5],[.5,.5,.5]);
+  quad([.5,-.5,-.5],[.5,.5,-.5],[.5,.5,.5],[.5,-.5,.5]);quad([-.5,.5,-.5],[-.5,-.5,-.5],[-.5,-.5,.5],[-.5,.5,.5]);
+  const vertexBuffer=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,vertexBuffer);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(vertices),gl.STATIC_DRAW);
+  gl.enableVertexAttribArray(0);gl.vertexAttribPointer(0,3,gl.FLOAT,false,0,0);
+  const instanceBuffer=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,instanceBuffer);
+  gl.enableVertexAttribArray(1);gl.vertexAttribPointer(1,4,gl.FLOAT,false,28,0);gl.vertexAttribDivisor(1,1);
+  gl.enableVertexAttribArray(2);gl.vertexAttribPointer(2,3,gl.FLOAT,false,28,16);gl.vertexAttribDivisor(2,1);
+  gl.enable(gl.DEPTH_TEST);gl.depthFunc(gl.LEQUAL);
+  return voxelGL={canvas,gl,program,instanceBuffer,vertexCount:vertices.length/3};
+}
+function renderVoxelGL(points,pose,yaw,focal,width,height){
+  const renderer=voxelGL||initializeVoxelGL();if(!renderer)return false;
+  const {canvas,gl,program,instanceBuffer,vertexCount}=renderer,ratio=Math.min(devicePixelRatio||1,1.25);
+  const pw=Math.round(width*ratio),ph=Math.round(height*ratio);if(canvas.width!==pw||canvas.height!==ph){canvas.width=pw;canvas.height=ph;}
+  canvas.style.display='block';gl.viewport(0,0,pw,ph);gl.clearColor(0,0,0,0);gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);
+  const values=new Float32Array(points.length*7);
+  points.forEach((point,index)=>{const z=point[2],color=z<.12?[.05,.9,.62]:z<.35?[.5,.9,.05]:z<.75?[1,.7,.03]:z<1.15?[1,.35,.03]:[1,.02,.5];values.set([point[0],point[1],z,point[3]||.1,...color],index*7);});
+  gl.useProgram(program);gl.bindBuffer(gl.ARRAY_BUFFER,instanceBuffer);gl.bufferData(gl.ARRAY_BUFFER,values,gl.DYNAMIC_DRAW);
+  gl.uniform2f(gl.getUniformLocation(program,'uPose'),pose.x_m,pose.y_m);gl.uniform1f(gl.getUniformLocation(program,'uYaw'),yaw);
+  gl.uniform2f(gl.getUniformLocation(program,'uViewport'),width,height);gl.uniform1f(gl.getUniformLocation(program,'uFocal'),focal);
+  gl.drawArraysInstanced(gl.TRIANGLES,0,vertexCount,points.length);return true;
+}
+
+function drawNavigation3D() {
+  const prepared=prepareNavigationCanvas(); if (!prepared) return;
+  const {ctx,width,height}=prepared, data=navigationSnapshot;
+  const empty=document.getElementById('navigation-empty');
+  const pose=data?.state?.pose, voxels=data?.voxels;
+  if (!data?.available || !pose) {
+    const sensor=data?.sensor;
+    empty.style.display='grid';
+    empty.textContent=data?.reason
+      || (sensor && !sensor.ready ? `sensors not ready: ${sensor.reason||'unknown'}` : 'Waiting for native navigation data…');
+    return;
+  }
+  empty.style.display='none';
+  if (navigationFollow) navigationCameraYaw=(pose.yaw_degrees||0)*Math.PI/180+Math.PI/2;
+  const points=voxels?.points_xyz || [], resolution=voxels?.resolution_m || .1;
+  const viewYaw=navigationCameraYaw-Math.PI/2;
+  const cy=Math.cos(viewYaw), sy=Math.sin(viewYaw);
+  const cameraBack=1.45, cameraHeight=.72, cameraPitch=.18;
+  const focal=Math.min(width,height)*.92*navigationZoom;
+  renderVoxelGL(points,pose,viewYaw,focal,width,height);
+  const pitchCos=Math.cos(cameraPitch), pitchSin=Math.sin(cameraPitch);
+  const project=(x,y,z=0)=>{
+    const dx=x-pose.x_m, dy=y-pose.y_m;
+    const right=-dx*sy+dy*cy;
+    const forward=dx*cy+dy*sy+cameraBack;
+    const up=z-cameraHeight;
+    const depth=forward*pitchCos-up*pitchSin;
+    const viewUp=up*pitchCos+forward*pitchSin;
+    return [width*.5+right/depth*focal,height*.42-viewUp/depth*focal,depth,depth>.12];
+  };
+  ctx.strokeStyle='rgba(148,163,184,.24)';ctx.lineWidth=1;
+  const worldPoint=(forward,right,z=0)=>[pose.x_m+forward*cy-right*sy,pose.y_m+forward*sy+right*cy,z];
+  for (let lateral=-6;lateral<=6;lateral++) {
+    const a=worldPoint(-1,lateral),b=worldPoint(14,lateral),pa=project(...a),pb=project(...b);
+    if(pa[3]&&pb[3]){ctx.beginPath();ctx.moveTo(pa[0],pa[1]);ctx.lineTo(pb[0],pb[1]);ctx.stroke();}
+  }
+  for (let distance=0;distance<=14;distance++) {
+    const a=worldPoint(distance,-7),b=worldPoint(distance,7),pa=project(...a),pb=project(...b);
+    if(pa[3]&&pb[3]){ctx.beginPath();ctx.moveTo(pa[0],pa[1]);ctx.lineTo(pb[0],pb[1]);ctx.stroke();}
+  }
+  const dogDepth=project(pose.x_m,pose.y_m,.18)[2];
+  const drawLine=(values,color,lineWidth)=>{
+    const visible=(values||[]).map(value=>project(value.x_m,value.y_m,.08)).filter(point=>point[3]);
+    if(visible.length<2)return;ctx.beginPath();visible.forEach((p,index)=>index?ctx.lineTo(p[0],p[1]):ctx.moveTo(p[0],p[1]));
+    ctx.strokeStyle=color;ctx.lineWidth=lineWidth;ctx.lineCap='round';ctx.lineJoin='round';ctx.stroke();
+  };
+  if (navigationLayers.trajectory) drawLine(data.trajectory,'rgba(22,163,74,.85)',3);
+  if (navigationLayers.path) drawLine(data.path,'rgba(124,58,237,.95)',4);
+  const goal=data.goal;
+  if (goal?.target_x_m!=null) {
+    const p=project(goal.target_x_m,goal.target_y_m,.1);if(p[3]){ctx.strokeStyle='#a855f7';ctx.lineWidth=3;
+    ctx.beginPath();ctx.arc(p[0],p[1],8,0,Math.PI*2);ctx.stroke();}
+  }
+  drawCartoonDog(ctx,project,pose,data.attitude,Math.min(72,focal*.13/dogDepth));
+  if (!points.length) {
+    ctx.fillStyle='rgba(71,85,105,.8)';ctx.font='500 12px var(--ff-mono)';ctx.textAlign='center';
+    ctx.fillText(data?.voxel_reason || 'Building 3D voxel map…',width/2,24);
+  }
+}
+
+function drawCartoonDog(ctx, project, pose, attitude, dogSize) {
+  const p=project(pose.x_m,pose.y_m,.18), size=Math.max(28,Math.min(72,dogSize));
+  const roll=(attitude?.roll_deg||0)*Math.PI/180;
+  const pitch=(attitude?.pitch_deg||0)*Math.PI/180;
+  ctx.save();ctx.translate(p[0],p[1]);ctx.rotate(-roll*.35);ctx.scale(1,1+Math.sin(pitch)*.18);ctx.lineJoin='round';
+  ctx.fillStyle='rgba(0,0,0,.28)';ctx.beginPath();ctx.ellipse(0,size*.44,size*.62,size*.18,0,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle='#9a5a24';
+  for(const x of [-size*.42,size*.42]){ctx.beginPath();ctx.roundRect(x-size*.11,size*.05,size*.22,size*.72,size*.1);ctx.fill();}
+  ctx.fillStyle='#c9792d';
+  for(const x of [-size*.3,size*.3]){ctx.beginPath();ctx.roundRect(x-size*.09,-size*.12,size*.18,size*.58,size*.09);ctx.fill();}
+  ctx.fillStyle='#e79a45';ctx.beginPath();ctx.roundRect(-size*.58,-size*.58,size*1.16,size*.78,size*.3);ctx.fill();
+  ctx.fillStyle='#efa858';ctx.beginPath();ctx.moveTo(-size*.4,-size*.5);ctx.lineTo(-size*.25,-size*1.03);ctx.lineTo(size*.25,-size*1.03);ctx.lineTo(size*.4,-size*.5);ctx.closePath();ctx.fill();
+  ctx.fillStyle='#6f4328';ctx.beginPath();ctx.moveTo(-size*.28,-size*.92);ctx.lineTo(-size*.52,-size*1.16);ctx.lineTo(-size*.48,-size*.72);ctx.fill();
+  ctx.beginPath();ctx.moveTo(size*.28,-size*.92);ctx.lineTo(size*.52,-size*1.16);ctx.lineTo(size*.48,-size*.72);ctx.fill();
+  ctx.fillStyle='#6f4328';ctx.beginPath();ctx.arc(0,-size*.77,size*.1,0,Math.PI*2);ctx.fill();
+  ctx.strokeStyle='#9a5a24';ctx.lineWidth=size*.13;ctx.beginPath();ctx.moveTo(size*.52,-size*.38);ctx.quadraticCurveTo(size*.82,-size*.65,size*.68,-size*.92);ctx.stroke();ctx.restore();
+}
+
+function renderNavigation(data) {
+  const previous=navigationSnapshot;
+  const incomingVoxels=data?.voxels;
+  if(incomingVoxels?.points_xyz){
+    navigationVoxelCache.clear();
+    incomingVoxels.points_xyz.forEach(point=>navigationVoxelCache.set(point.slice(0,3).join(','),point));
+  }else if(incomingVoxels?.delta){
+    incomingVoxels.delta.remove.forEach(point=>navigationVoxelCache.delete(point.join(',')));
+    incomingVoxels.delta.add.forEach(point=>navigationVoxelCache.set(point.slice(0,3).join(','),point));
+    incomingVoxels.points_xyz=Array.from(navigationVoxelCache.values());
+  }
+  if((data?.costmap==null && data?.costmap_unchanged) && previous?.costmap){
+    data.costmap=previous.costmap;
+  }
+  navigationSnapshot=data;
+  const state=data?.state;
+  document.getElementById('navigation-status').textContent=data?.available ? (data.costmap?'live':'state only') : 'unavailable';
+  document.getElementById('nav-state').textContent=state?.status || '—';
+  document.getElementById('nav-replans').textContent=state?.replan_count ?? '—';
+  document.getElementById('nav-pose').textContent=state?.pose ? `${state.pose.x_m.toFixed(2)}, ${state.pose.y_m.toFixed(2)} m` : '—';
+  const clearances=(data?.events||[]).filter(row=>row.event==='path_clearance' && row.minimum_clearance_m!=null);
+  document.getElementById('nav-clearance').textContent=clearances.length ? `${clearances.at(-1).minimum_clearance_m.toFixed(2)} m` : '—';
+  const sensor=data?.sensor;
+  document.getElementById('nav-lidar').textContent=sensor?.pointcloud_age_seconds!=null ? `${sensor.point_count} pts · ${(sensor.pointcloud_age_seconds*1000).toFixed(0)} ms` : '—';
+  const command=data?.command;
+  document.getElementById('nav-command').textContent=command ? `${(command.vx_mps||0).toFixed(2)}, ${(command.vy_mps||0).toFixed(2)}, ${(command.yaw_rps||0).toFixed(2)}` : '—';
+  const pose=state?.pose, voxels=data?.voxels;
+  const signature=[navigationMode,voxels?.generation,voxels?.live_generation,pose?.x_m?.toFixed(2),pose?.y_m?.toFixed(2),pose?.yaw_degrees?.toFixed(1),data?.path?.length,data?.trajectory?.length,data?.costmap_unchanged===false].join(':');
+  if (signature!==navigationLastDrawSignature) {
+    navigationLastDrawSignature=signature;
+    requestAnimationFrame(drawNavigation);
+  }
+}
+
+function connectNavigationWS() {
+  const proto=location.protocol==='https:'?'wss':'ws';
+  const ws=navigationWS=new WebSocket(`${proto}://${location.host}/ws/navigation`);
+  ws.addEventListener('open', ()=>sendNavigationView(navigationViewActive));
+  ws.addEventListener('message', event=>{ try { renderNavigation(JSON.parse(event.data)); } catch (_) {} });
+  ws.addEventListener('close', ()=>{
+    if(navigationWS===ws)navigationWS=null;
+    document.getElementById('navigation-status').textContent='offline';
+    setTimeout(connectNavigationWS,3000);
+  });
+  ws.addEventListener('error', ()=>ws.close());
+}
+
+function sendNavigationView(active) {
+  if(navigationWS && navigationWS.readyState===WebSocket.OPEN){
+    navigationWS.send(JSON.stringify({type:'view',active:Boolean(active)}));
+  }
+}
+
+function refreshNavigationCamera() {
+  if(navigationCameraInFlight)return;
+  const image=document.getElementById('navigation-camera-frame');
+  const status=document.getElementById('navigation-camera-status');
+  const probe=new Image();
+  navigationCameraInFlight=true;
+  probe.onload=()=>{navigationCameraInFlight=false;image.src=probe.src;image.hidden=false;status.style.display='none';};
+  probe.onerror=()=>{
+    navigationCameraInFlight=false;
+    if(!image.src){image.hidden=true;status.style.display='grid';status.textContent='Camera unavailable · enable Go2 video tap';}
+  };
+  probe.src=`/api/camera/frame?t=${Date.now()}`;
+}
+
+// JPEG polling is the degraded path: every frame costs a decode, a re-encode
+// and a round trip, so it only runs when WebRTC relay is unavailable.
+function startNavigationCameraPolling() {
+  if(navigationCameraTimer)return;
+  refreshNavigationCamera();
+  navigationCameraTimer=setInterval(refreshNavigationCamera,250);
+}
+
+function stopNavigationCameraPolling() {
+  if(navigationCameraTimer)clearInterval(navigationCameraTimer);
+  navigationCameraTimer=null;
+  navigationCameraInFlight=false;
+}
+
+function waitForIceGathering(pc) {
+  if(pc.iceGatheringState==='complete')return Promise.resolve();
+  return new Promise(resolve=>{
+    const done=()=>{
+      if(pc.iceGatheringState!=='complete')return;
+      pc.removeEventListener('icegatheringstatechange',done);resolve();
+    };
+    pc.addEventListener('icegatheringstatechange',done);
+    setTimeout(resolve,3000);
+  });
+}
+
+async function startNavigationCameraWebRTC() {
+  const video=document.getElementById('navigation-camera-video');
+  const image=document.getElementById('navigation-camera-frame');
+  const status=document.getElementById('navigation-camera-status');
+  const pc=navigationCameraPC=new RTCPeerConnection();
+  pc.addTransceiver('video',{direction:'recvonly'});
+  pc.addEventListener('track',event=>{
+    if(navigationCameraPC!==pc)return;
+    video.srcObject=event.streams[0];
+    video.hidden=false;image.hidden=true;status.style.display='none';
+    stopNavigationCameraPolling();
+  });
+  pc.addEventListener('connectionstatechange',()=>{
+    if(navigationCameraPC!==pc)return;
+    if(['failed','disconnected','closed'].includes(pc.connectionState)){
+      video.hidden=true;video.srcObject=null;
+      startNavigationCameraPolling();
+    }
+  });
+  await pc.setLocalDescription(await pc.createOffer());
+  await waitForIceGathering(pc);
+  const response=await fetch('/api/camera/webrtc/offer',{
+    method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({sdp:pc.localDescription.sdp,type:pc.localDescription.type}),
+  });
+  if(!response.ok)throw new Error(`camera offer rejected (${response.status})`);
+  if(navigationCameraPC!==pc){pc.close();return;}
+  await pc.setRemoteDescription(await response.json());
+}
+
+function stopNavigationCameraWebRTC() {
+  const video=document.getElementById('navigation-camera-video');
+  if(navigationCameraPC){navigationCameraPC.close();navigationCameraPC=null;}
+  video.hidden=true;video.srcObject=null;
+}
+
+function setNavigationCamera(active) {
+  if(!active){
+    stopNavigationCameraWebRTC();
+    stopNavigationCameraPolling();
+    return;
+  }
+  if(navigationCameraPC)return;
+  startNavigationCameraWebRTC().catch(()=>{
+    stopNavigationCameraWebRTC();
+    startNavigationCameraPolling();
+  });
+}
 
 // ── Pipeline Rendering ─────────────────────────────────
 function buildPipeline() {
@@ -1103,7 +1854,11 @@ document.addEventListener('keydown', (e) => {
 // ── Init ───────────────────────────────────────────────
 buildPipeline();
 updatePipeline(-1);
+setupCenterTabs();
+setupKeyboardDrive();
+new ResizeObserver(drawNavigation).observe(document.getElementById('navigation-canvas-wrap'));
 connectWS();
+connectNavigationWS();
 refreshStatus();
 addEvent('system', 'Console initialized', false);
 </script>

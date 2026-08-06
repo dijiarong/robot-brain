@@ -26,6 +26,9 @@ except ImportError:  # pragma: no cover - exercised only without grpc installed
 
 
 def _make_robot() -> tuple[UnitreeRobot, FakeUnitreeTransport, Settings]:
+    from robot_brain.control.authority import reset_motion_authority_for_tests
+
+    reset_motion_authority_for_tests()
     settings = Settings(
         robot_backend="unitree",
         unitree_dry_run=True,

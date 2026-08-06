@@ -1,0 +1,827 @@
+{
+  "dimos_source_digest": "a8bdede75d0462baeeb1d92d8d85cf5c0fbaa20787ae001b5611100ad94cd60c",
+  "excluded": [
+    {
+      "reason": "test_or_package_scaffolding",
+      "source": "dimos/mapping/google_maps/conftest.py"
+    },
+    {
+      "reason": "geospatial_service_not_in_go2_navigation_blueprint",
+      "source": "dimos/mapping/google_maps/google_maps.py"
+    },
+    {
+      "reason": "geospatial_service_not_in_go2_navigation_blueprint",
+      "source": "dimos/mapping/google_maps/models.py"
+    },
+    {
+      "reason": "test_or_package_scaffolding",
+      "source": "dimos/mapping/google_maps/test_google_maps.py"
+    },
+    {
+      "reason": "offline_visualization_or_evaluation",
+      "source": "dimos/mapping/loop_closure/eval.py"
+    },
+    {
+      "reason": "test_or_package_scaffolding",
+      "source": "dimos/mapping/loop_closure/test_pgo.py"
+    },
+    {
+      "reason": "offline_visualization_or_evaluation",
+      "source": "dimos/mapping/loop_closure/utils/markers_rrd.py"
+    },
+    {
+      "reason": "test_or_package_scaffolding",
+      "source": "dimos/mapping/occupancy/conftest.py"
+    },
+    {
+      "reason": "test_or_package_scaffolding",
+      "source": "dimos/mapping/occupancy/test_extrude_occupancy.py"
+    },
+    {
+      "reason": "test_or_package_scaffolding",
+      "source": "dimos/mapping/occupancy/test_gradient.py"
+    },
+    {
+      "reason": "test_or_package_scaffolding",
+      "source": "dimos/mapping/occupancy/test_inflation.py"
+    },
+    {
+      "reason": "test_or_package_scaffolding",
+      "source": "dimos/mapping/occupancy/test_operations.py"
+    },
+    {
+      "reason": "test_or_package_scaffolding",
+      "source": "dimos/mapping/occupancy/test_path_map.py"
+    },
+    {
+      "reason": "test_or_package_scaffolding",
+      "source": "dimos/mapping/occupancy/test_path_mask.py"
+    },
+    {
+      "reason": "test_or_package_scaffolding",
+      "source": "dimos/mapping/occupancy/test_path_resampling.py"
+    },
+    {
+      "reason": "test_or_package_scaffolding",
+      "source": "dimos/mapping/occupancy/test_visualizations.py"
+    },
+    {
+      "reason": "offline_visualization_or_benchmark",
+      "source": "dimos/mapping/occupancy/visualizations.py"
+    },
+    {
+      "reason": "offline_visualization_or_benchmark",
+      "source": "dimos/mapping/occupancy/visualize_path.py"
+    },
+    {
+      "reason": "geospatial_service_not_in_go2_navigation_blueprint",
+      "source": "dimos/mapping/osm/current_location_map.py"
+    },
+    {
+      "reason": "geospatial_service_not_in_go2_navigation_blueprint",
+      "source": "dimos/mapping/osm/demo_osm.py"
+    },
+    {
+      "reason": "geospatial_service_not_in_go2_navigation_blueprint",
+      "source": "dimos/mapping/osm/osm.py"
+    },
+    {
+      "reason": "geospatial_service_not_in_go2_navigation_blueprint",
+      "source": "dimos/mapping/osm/query.py"
+    },
+    {
+      "reason": "test_or_package_scaffolding",
+      "source": "dimos/mapping/osm/test_osm.py"
+    },
+    {
+      "reason": "offline_visualization_or_benchmark",
+      "source": "dimos/mapping/pointclouds/demo.py"
+    },
+    {
+      "reason": "test_or_package_scaffolding",
+      "source": "dimos/mapping/pointclouds/test_occupancy.py"
+    },
+    {
+      "reason": "test_or_package_scaffolding",
+      "source": "dimos/mapping/pointclouds/test_occupancy_speed.py"
+    },
+    {
+      "reason": "offline_visualization_or_benchmark",
+      "source": "dimos/mapping/pointclouds/tool_occupancy_speed.py"
+    },
+    {
+      "reason": "test_or_package_scaffolding",
+      "source": "dimos/mapping/ray_tracing/test_transformer.py"
+    },
+    {
+      "reason": "test_or_package_scaffolding",
+      "source": "dimos/mapping/ray_tracing/test_voxel_map.py"
+    },
+    {
+      "reason": "test_or_package_scaffolding",
+      "source": "dimos/mapping/relocalization/test_module.py"
+    },
+    {
+      "reason": "test_or_package_scaffolding",
+      "source": "dimos/mapping/relocalization/test_relocalize.py"
+    },
+    {
+      "reason": "test_or_package_scaffolding",
+      "source": "dimos/mapping/test_costmapper_diagnostics.py"
+    },
+    {
+      "reason": "test_or_package_scaffolding",
+      "source": "dimos/mapping/test_voxels.py"
+    },
+    {
+      "reason": "operator_dataset_tooling",
+      "source": "dimos/mapping/tool_voxels.py"
+    },
+    {
+      "reason": "operator_dataset_tooling",
+      "source": "dimos/mapping/utils/cli/map.py"
+    },
+    {
+      "reason": "operator_dataset_tooling",
+      "source": "dimos/mapping/utils/cli/pose_fill.py"
+    },
+    {
+      "reason": "operator_dataset_tooling",
+      "source": "dimos/mapping/utils/cli/rename.py"
+    },
+    {
+      "reason": "operator_dataset_tooling",
+      "source": "dimos/mapping/utils/cli/replay_marker.py"
+    },
+    {
+      "reason": "test_or_package_scaffolding",
+      "source": "dimos/mapping/utils/cli/test_cli.py"
+    },
+    {
+      "reason": "test_or_package_scaffolding",
+      "source": "dimos/mapping/utils/cli/test_pose_fill.py"
+    },
+    {
+      "reason": "test_or_package_scaffolding",
+      "source": "dimos/navigation/basic_path_follower/test_module.py"
+    },
+    {
+      "reason": "test_or_package_scaffolding",
+      "source": "dimos/navigation/cmu_nav/modules/far_planner/test_far_planner_rosbag.py"
+    },
+    {
+      "reason": "test_or_package_scaffolding",
+      "source": "dimos/navigation/cmu_nav/modules/local_planner/test_local_planner_rosbag.py"
+    },
+    {
+      "reason": "test_or_package_scaffolding",
+      "source": "dimos/navigation/cmu_nav/modules/path_follower/test_path_follower_rosbag.py"
+    },
+    {
+      "reason": "test_or_package_scaffolding",
+      "source": "dimos/navigation/cmu_nav/modules/pgo/test_pgo_rosbag.py"
+    },
+    {
+      "reason": "test_or_package_scaffolding",
+      "source": "dimos/navigation/cmu_nav/modules/simple_planner/test_simple_planner.py"
+    },
+    {
+      "reason": "test_or_package_scaffolding",
+      "source": "dimos/navigation/cmu_nav/modules/terrain_analysis/test_terrain_analysis_rosbag.py"
+    },
+    {
+      "reason": "test_or_package_scaffolding",
+      "source": "dimos/navigation/cmu_nav/modules/terrain_map_ext/test_terrain_map_ext_rosbag.py"
+    },
+    {
+      "reason": "test_or_package_scaffolding",
+      "source": "dimos/navigation/cmu_nav/tests/conftest.py"
+    },
+    {
+      "reason": "test_or_package_scaffolding",
+      "source": "dimos/navigation/cmu_nav/tests/rosbag_fixtures.py"
+    },
+    {
+      "reason": "test_or_package_scaffolding",
+      "source": "dimos/navigation/diagnostics/test_benchmark.py"
+    },
+    {
+      "reason": "test_or_package_scaffolding",
+      "source": "dimos/navigation/diagnostics/test_manifest.py"
+    },
+    {
+      "reason": "test_or_package_scaffolding",
+      "source": "dimos/navigation/diagnostics/test_metrics.py"
+    },
+    {
+      "reason": "test_or_package_scaffolding",
+      "source": "dimos/navigation/diagnostics/test_planner_integration.py"
+    },
+    {
+      "reason": "test_or_package_scaffolding",
+      "source": "dimos/navigation/diagnostics/test_report.py"
+    },
+    {
+      "reason": "test_or_package_scaffolding",
+      "source": "dimos/navigation/diagnostics/test_session.py"
+    },
+    {
+      "reason": "test_or_package_scaffolding",
+      "source": "dimos/navigation/diagnostics/test_sink.py"
+    },
+    {
+      "reason": "test_or_package_scaffolding",
+      "source": "dimos/navigation/diagnostics/test_static_capture.py"
+    },
+    {
+      "reason": "test_or_package_scaffolding",
+      "source": "dimos/navigation/frontier_exploration/test_wavefront_frontier_goal_selector.py"
+    },
+    {
+      "reason": "test_or_package_scaffolding",
+      "source": "dimos/navigation/movement_manager/test_movement_manager.py"
+    },
+    {
+      "reason": "test_or_package_scaffolding",
+      "source": "dimos/navigation/nav_3d/mls_planner/test_mls_planner.py"
+    },
+    {
+      "reason": "test_or_package_scaffolding",
+      "source": "dimos/navigation/nav_3d/mls_planner/test_odom_body_frame.py"
+    },
+    {
+      "reason": "test_or_package_scaffolding",
+      "source": "dimos/navigation/nav_3d/mls_planner/test_transformer.py"
+    },
+    {
+      "reason": "offline_visualization_or_evaluation",
+      "source": "dimos/navigation/nav_3d/mls_planner/utils/plan_rrd.py"
+    },
+    {
+      "reason": "test_or_package_scaffolding",
+      "source": "dimos/navigation/patrolling/test_create_patrol_router.py"
+    },
+    {
+      "reason": "test_or_package_scaffolding",
+      "source": "dimos/navigation/patrolling/test_module.py"
+    },
+    {
+      "reason": "test_or_package_scaffolding",
+      "source": "dimos/navigation/replanning_a_star/test_diagnostics.py"
+    },
+    {
+      "reason": "test_or_package_scaffolding",
+      "source": "dimos/navigation/replanning_a_star/test_goal_validator.py"
+    },
+    {
+      "reason": "test_or_package_scaffolding",
+      "source": "dimos/navigation/replanning_a_star/test_min_cost_astar.py"
+    },
+    {
+      "reason": "test_or_package_scaffolding",
+      "source": "dimos/navigation/replanning_a_star/test_replanning_planner.py"
+    },
+    {
+      "reason": "test_or_package_scaffolding",
+      "source": "dimos/navigation/test_topology.py"
+    },
+    {
+      "reason": "test_or_package_scaffolding",
+      "source": "dimos/navigation/visual/test_query.py"
+    },
+    {
+      "reason": "test_or_package_scaffolding",
+      "source": "dimos/robot/unitree/go2/blueprints/agentic/test_relocalization_memory_blueprint.py"
+    },
+    {
+      "reason": "test_or_package_scaffolding",
+      "source": "dimos/robot/unitree/go2/blueprints/smart/test_unitree_go2_markers.py"
+    },
+    {
+      "reason": "transport_fleet_or_recording_tool_outside_navigation_algorithm",
+      "source": "dimos/robot/unitree/go2/cli/ble.py"
+    },
+    {
+      "reason": "transport_fleet_or_recording_tool_outside_navigation_algorithm",
+      "source": "dimos/robot/unitree/go2/cli/go2tool.py"
+    },
+    {
+      "reason": "transport_fleet_or_recording_tool_outside_navigation_algorithm",
+      "source": "dimos/robot/unitree/go2/cli/landiscovery.py"
+    },
+    {
+      "reason": "transport_fleet_or_recording_tool_outside_navigation_algorithm",
+      "source": "dimos/robot/unitree/go2/dds/cdr.py"
+    },
+    {
+      "reason": "transport_fleet_or_recording_tool_outside_navigation_algorithm",
+      "source": "dimos/robot/unitree/go2/dds/cli/render.py"
+    },
+    {
+      "reason": "transport_fleet_or_recording_tool_outside_navigation_algorithm",
+      "source": "dimos/robot/unitree/go2/dds/codec.py"
+    },
+    {
+      "reason": "transport_fleet_or_recording_tool_outside_navigation_algorithm",
+      "source": "dimos/robot/unitree/go2/dds/msgs/BmsCmd.py"
+    },
+    {
+      "reason": "transport_fleet_or_recording_tool_outside_navigation_algorithm",
+      "source": "dimos/robot/unitree/go2/dds/msgs/BmsState.py"
+    },
+    {
+      "reason": "transport_fleet_or_recording_tool_outside_navigation_algorithm",
+      "source": "dimos/robot/unitree/go2/dds/msgs/CompressedVideo.py"
+    },
+    {
+      "reason": "transport_fleet_or_recording_tool_outside_navigation_algorithm",
+      "source": "dimos/robot/unitree/go2/dds/msgs/ControlEvent.py"
+    },
+    {
+      "reason": "transport_fleet_or_recording_tool_outside_navigation_algorithm",
+      "source": "dimos/robot/unitree/go2/dds/msgs/HeightMap.py"
+    },
+    {
+      "reason": "transport_fleet_or_recording_tool_outside_navigation_algorithm",
+      "source": "dimos/robot/unitree/go2/dds/msgs/IMUState.py"
+    },
+    {
+      "reason": "transport_fleet_or_recording_tool_outside_navigation_algorithm",
+      "source": "dimos/robot/unitree/go2/dds/msgs/LowCmd.py"
+    },
+    {
+      "reason": "transport_fleet_or_recording_tool_outside_navigation_algorithm",
+      "source": "dimos/robot/unitree/go2/dds/msgs/LowState.py"
+    },
+    {
+      "reason": "transport_fleet_or_recording_tool_outside_navigation_algorithm",
+      "source": "dimos/robot/unitree/go2/dds/msgs/MotorCmd.py"
+    },
+    {
+      "reason": "transport_fleet_or_recording_tool_outside_navigation_algorithm",
+      "source": "dimos/robot/unitree/go2/dds/msgs/MotorState.py"
+    },
+    {
+      "reason": "transport_fleet_or_recording_tool_outside_navigation_algorithm",
+      "source": "dimos/robot/unitree/go2/dds/msgs/PathPoint.py"
+    },
+    {
+      "reason": "transport_fleet_or_recording_tool_outside_navigation_algorithm",
+      "source": "dimos/robot/unitree/go2/dds/msgs/SportModeState.py"
+    },
+    {
+      "reason": "transport_fleet_or_recording_tool_outside_navigation_algorithm",
+      "source": "dimos/robot/unitree/go2/dds/msgs/Telemetry.py"
+    },
+    {
+      "reason": "transport_fleet_or_recording_tool_outside_navigation_algorithm",
+      "source": "dimos/robot/unitree/go2/dds/msgs/TimeSpec.py"
+    },
+    {
+      "reason": "transport_fleet_or_recording_tool_outside_navigation_algorithm",
+      "source": "dimos/robot/unitree/go2/dds/msgs/base.py"
+    },
+    {
+      "reason": "transport_fleet_or_recording_tool_outside_navigation_algorithm",
+      "source": "dimos/robot/unitree/go2/dds/ros.py"
+    },
+    {
+      "reason": "transport_fleet_or_recording_tool_outside_navigation_algorithm",
+      "source": "dimos/robot/unitree/go2/dds/store.py"
+    },
+    {
+      "reason": "test_or_package_scaffolding",
+      "source": "dimos/robot/unitree/go2/dds/test_store.py"
+    },
+    {
+      "reason": "transport_fleet_or_recording_tool_outside_navigation_algorithm",
+      "source": "dimos/robot/unitree/go2/dds/video.py"
+    },
+    {
+      "reason": "transport_fleet_or_recording_tool_outside_navigation_algorithm",
+      "source": "dimos/robot/unitree/go2/fleet_connection.py"
+    },
+    {
+      "reason": "transport_fleet_or_recording_tool_outside_navigation_algorithm",
+      "source": "dimos/robot/unitree/go2/go2_mid360_recorder.py"
+    },
+    {
+      "reason": "test_or_package_scaffolding",
+      "source": "dimos/robot/unitree/go2/test_connection.py"
+    }
+  ],
+  "forbidden_runtime_imports": [],
+  "groups": {
+    "arbitration": {
+      "implementation": [
+        {
+          "exists": true,
+          "path": "robot_brain/teleop/session.py"
+        }
+      ],
+      "source_files": [
+        "dimos/navigation/cmu_nav/modules/click_start_goal_router/click_start_goal_router.py",
+        "dimos/navigation/movement_manager/movement_manager.py"
+      ],
+      "tests": [
+        {
+          "exists": true,
+          "path": "tests/test_navigation_control_arbitration.py"
+        }
+      ]
+    },
+    "contracts": {
+      "implementation": [
+        {
+          "exists": true,
+          "path": "robot_brain/navigation/base.py"
+        }
+      ],
+      "source_files": [
+        "dimos/navigation/base.py",
+        "dimos/navigation/cmu_nav/frames.py",
+        "dimos/navigation/cmu_nav/main.py",
+        "dimos/navigation/navigation_spec.py"
+      ],
+      "tests": [
+        {
+          "exists": true,
+          "path": "tests/test_navigation_capability.py"
+        }
+      ]
+    },
+    "diagnostics": {
+      "implementation": [
+        {
+          "exists": true,
+          "path": "robot_brain/navigation/diagnostics.py"
+        },
+        {
+          "exists": true,
+          "path": "robot_brain/navigation/replay.py"
+        }
+      ],
+      "source_files": [
+        "dimos/mapping/utils/cli/replay.py",
+        "dimos/mapping/utils/cli/summary.py",
+        "dimos/navigation/cmu_nav/modules/nav_record/nav_record.py",
+        "dimos/navigation/diagnostics/benchmark.py",
+        "dimos/navigation/diagnostics/cli.py",
+        "dimos/navigation/diagnostics/manifest.py",
+        "dimos/navigation/diagnostics/metrics.py",
+        "dimos/navigation/diagnostics/replay_capture.py",
+        "dimos/navigation/diagnostics/report.py",
+        "dimos/navigation/diagnostics/rerun_export.py",
+        "dimos/navigation/diagnostics/schema.py",
+        "dimos/navigation/diagnostics/session.py",
+        "dimos/navigation/diagnostics/sink.py",
+        "dimos/navigation/diagnostics/static_capture.py"
+      ],
+      "tests": [
+        {
+          "exists": true,
+          "path": "tests/test_navigation_diagnostics.py"
+        },
+        {
+          "exists": true,
+          "path": "tests/test_navigation_replay.py"
+        }
+      ]
+    },
+    "exploration_patrol": {
+      "implementation": [
+        {
+          "exists": true,
+          "path": "robot_brain/navigation/frontier.py"
+        },
+        {
+          "exists": true,
+          "path": "robot_brain/navigation/exploration.py"
+        },
+        {
+          "exists": true,
+          "path": "robot_brain/navigation/patrol.py"
+        },
+        {
+          "exists": true,
+          "path": "robot_brain/navigation/terrain_exploration.py"
+        }
+      ],
+      "source_files": [
+        "dimos/navigation/cmu_nav/modules/tare_planner/tare_planner.py",
+        "dimos/navigation/frontier_exploration/wavefront_frontier_goal_selector.py",
+        "dimos/navigation/patrolling/constants.py",
+        "dimos/navigation/patrolling/create_patrol_router.py",
+        "dimos/navigation/patrolling/module.py",
+        "dimos/navigation/patrolling/routers/base_patrol_router.py",
+        "dimos/navigation/patrolling/routers/coverage_patrol_router.py",
+        "dimos/navigation/patrolling/routers/frontier_patrol_router.py",
+        "dimos/navigation/patrolling/routers/patrol_router.py",
+        "dimos/navigation/patrolling/routers/random_patrol_router.py",
+        "dimos/navigation/patrolling/routers/visitation_history.py",
+        "dimos/navigation/patrolling/utilities.py"
+      ],
+      "tests": [
+        {
+          "exists": true,
+          "path": "tests/test_native_exploration.py"
+        },
+        {
+          "exists": true,
+          "path": "tests/test_native_patrol.py"
+        },
+        {
+          "exists": true,
+          "path": "tests/test_native_terrain_exploration.py"
+        }
+      ]
+    },
+    "integration": {
+      "implementation": [
+        {
+          "exists": true,
+          "path": "robot_brain/runtime/loop.py"
+        },
+        {
+          "exists": true,
+          "path": "robot_brain/skills/builtin/native_navigation.py"
+        },
+        {
+          "exists": true,
+          "path": "robot_brain/tools/builtin/native_navigation.py"
+        }
+      ],
+      "source_files": [
+        "dimos/agents/skills/navigation.py",
+        "dimos/robot/unitree/go2/blueprints/agentic/_common_agentic.py",
+        "dimos/robot/unitree/go2/blueprints/agentic/unitree_go2_agentic.py",
+        "dimos/robot/unitree/go2/blueprints/agentic/unitree_go2_agentic_deepseek.py",
+        "dimos/robot/unitree/go2/blueprints/agentic/unitree_go2_agentic_huggingface.py",
+        "dimos/robot/unitree/go2/blueprints/agentic/unitree_go2_agentic_ollama.py",
+        "dimos/robot/unitree/go2/blueprints/agentic/unitree_go2_crow_agentic.py",
+        "dimos/robot/unitree/go2/blueprints/agentic/unitree_go2_relocalization_memory_agentic.py",
+        "dimos/robot/unitree/go2/blueprints/agentic/unitree_go2_relocalization_memory_agentic_deepseek.py",
+        "dimos/robot/unitree/go2/blueprints/agentic/unitree_go2_security.py",
+        "dimos/robot/unitree/go2/blueprints/agentic/unitree_go2_temporal_memory.py",
+        "dimos/robot/unitree/go2/blueprints/basic/unitree_go2_basic.py",
+        "dimos/robot/unitree/go2/blueprints/basic/unitree_go2_coordinator.py",
+        "dimos/robot/unitree/go2/blueprints/basic/unitree_go2_fleet.py",
+        "dimos/robot/unitree/go2/blueprints/basic/unitree_go2_keyboard_teleop.py",
+        "dimos/robot/unitree/go2/blueprints/basic/unitree_go2_mid360_record.py",
+        "dimos/robot/unitree/go2/blueprints/basic/unitree_go2_webrtc_keyboard_teleop.py",
+        "dimos/robot/unitree/go2/blueprints/basic/unitree_go2_webrtc_rage_keyboard_teleop.py",
+        "dimos/robot/unitree/go2/blueprints/navigation/unitree_go2_nav_3d.py",
+        "dimos/robot/unitree/go2/blueprints/smart/unitree_go2.py",
+        "dimos/robot/unitree/go2/blueprints/smart/unitree_go2_detection.py",
+        "dimos/robot/unitree/go2/blueprints/smart/unitree_go2_ros.py",
+        "dimos/robot/unitree/go2/blueprints/smart/unitree_go2_spatial.py",
+        "dimos/robot/unitree/go2/blueprints/smart/unitree_go2_vlm_stream_test.py"
+      ],
+      "tests": [
+        {
+          "exists": true,
+          "path": "tests/test_native_navigation_skills.py"
+        },
+        {
+          "exists": true,
+          "path": "tests/test_native_navigation_tools.py"
+        }
+      ]
+    },
+    "mapping": {
+      "implementation": [
+        {
+          "exists": true,
+          "path": "robot_brain/navigation/grid.py"
+        },
+        {
+          "exists": true,
+          "path": "robot_brain/navigation/map_store.py"
+        }
+      ],
+      "source_files": [
+        "dimos/mapping/costmapper.py",
+        "dimos/mapping/models.py",
+        "dimos/mapping/occupancy/extrude_occupancy.py",
+        "dimos/mapping/occupancy/gradient.py",
+        "dimos/mapping/occupancy/inflation.py",
+        "dimos/mapping/occupancy/operations.py",
+        "dimos/mapping/occupancy/path_map.py",
+        "dimos/mapping/occupancy/path_mask.py",
+        "dimos/mapping/occupancy/path_resampling.py",
+        "dimos/mapping/occupancy/types.py",
+        "dimos/mapping/pointclouds/accumulators/general.py",
+        "dimos/mapping/pointclouds/accumulators/protocol.py",
+        "dimos/mapping/pointclouds/occupancy.py",
+        "dimos/mapping/pointclouds/util.py",
+        "dimos/mapping/ray_tracing/module.py",
+        "dimos/mapping/ray_tracing/transformer.py",
+        "dimos/mapping/ray_tracing/utils/raytrace_rrd.py",
+        "dimos/mapping/ray_tracing/voxel_map.py",
+        "dimos/mapping/utils/distance.py",
+        "dimos/mapping/voxels.py"
+      ],
+      "tests": [
+        {
+          "exists": true,
+          "path": "tests/test_native_map_store.py"
+        },
+        {
+          "exists": true,
+          "path": "tests/test_native_navigation.py"
+        }
+      ]
+    },
+    "planning_control": {
+      "implementation": [
+        {
+          "exists": true,
+          "path": "robot_brain/navigation/planner.py"
+        },
+        {
+          "exists": true,
+          "path": "robot_brain/navigation/native_go2.py"
+        },
+        {
+          "exists": true,
+          "path": "robot_brain/navigation/motion_safety.py"
+        }
+      ],
+      "source_files": [
+        "dimos/navigation/basic_path_follower/module.py",
+        "dimos/navigation/replanning_a_star/controllers.py",
+        "dimos/navigation/replanning_a_star/global_planner.py",
+        "dimos/navigation/replanning_a_star/goal_validator.py",
+        "dimos/navigation/replanning_a_star/local_planner.py",
+        "dimos/navigation/replanning_a_star/min_cost_astar.py",
+        "dimos/navigation/replanning_a_star/module.py",
+        "dimos/navigation/replanning_a_star/module_spec.py",
+        "dimos/navigation/replanning_a_star/navigation_map.py",
+        "dimos/navigation/replanning_a_star/path_clearance.py",
+        "dimos/navigation/replanning_a_star/path_distancer.py",
+        "dimos/navigation/replanning_a_star/position_tracker.py",
+        "dimos/navigation/replanning_a_star/replan_limiter.py"
+      ],
+      "tests": [
+        {
+          "exists": true,
+          "path": "tests/test_native_navigation.py"
+        },
+        {
+          "exists": true,
+          "path": "tests/test_native_motion_safety.py"
+        }
+      ]
+    },
+    "pose_graph": {
+      "implementation": [
+        {
+          "exists": true,
+          "path": "robot_brain/navigation/pose_graph.py"
+        }
+      ],
+      "source_files": [
+        "dimos/mapping/loop_closure/pgo.py",
+        "dimos/mapping/loop_closure/pgo_auto.py",
+        "dimos/navigation/cmu_nav/modules/pgo/pgo.py"
+      ],
+      "tests": [
+        {
+          "exists": true,
+          "path": "tests/test_native_pose_graph.py"
+        }
+      ]
+    },
+    "relocalization": {
+      "implementation": [
+        {
+          "exists": true,
+          "path": "robot_brain/navigation/relocalization.py"
+        }
+      ],
+      "source_files": [
+        "dimos/mapping/relocalization/module.py",
+        "dimos/mapping/relocalization/relocalize.py"
+      ],
+      "tests": [
+        {
+          "exists": true,
+          "path": "tests/test_native_relocalization.py"
+        }
+      ]
+    },
+    "sensors": {
+      "implementation": [
+        {
+          "exists": true,
+          "path": "robot_brain/navigation/sensors.py"
+        },
+        {
+          "exists": true,
+          "path": "robot_brain/actuation/unitree_webrtc.py"
+        }
+      ],
+      "source_files": [
+        "dimos/robot/unitree/go2/connection.py",
+        "dimos/robot/unitree/go2/connection_spec.py",
+        "dimos/robot/unitree/go2/dds/extrinsics.py",
+        "dimos/robot/unitree/go2/go2_mid360_static_transforms.py"
+      ],
+      "tests": [
+        {
+          "exists": true,
+          "path": "tests/test_navigation_sensors.py"
+        }
+      ]
+    },
+    "terrain3d": {
+      "implementation": [
+        {
+          "exists": true,
+          "path": "robot_brain/navigation/terrain3d.py"
+        },
+        {
+          "exists": true,
+          "path": "robot_brain/navigation/terrain_controller.py"
+        }
+      ],
+      "source_files": [
+        "dimos/navigation/cmu_nav/modules/far_planner/far_planner.py",
+        "dimos/navigation/cmu_nav/modules/local_planner/local_planner.py",
+        "dimos/navigation/cmu_nav/modules/path_follower/path_follower.py",
+        "dimos/navigation/cmu_nav/modules/simple_planner/simple_planner.py",
+        "dimos/navigation/cmu_nav/modules/terrain_analysis/terrain_analysis.py",
+        "dimos/navigation/cmu_nav/modules/terrain_map_ext/terrain_map_ext.py",
+        "dimos/navigation/nav_3d/evaluator/blueprints.py",
+        "dimos/navigation/nav_3d/evaluator/evaluator.py",
+        "dimos/navigation/nav_3d/evaluator/mesh_loader.py",
+        "dimos/navigation/nav_3d/evaluator/scenarios.py",
+        "dimos/navigation/nav_3d/mls_planner/goal_relay.py",
+        "dimos/navigation/nav_3d/mls_planner/mls_planner.py",
+        "dimos/navigation/nav_3d/mls_planner/mls_planner_native.py",
+        "dimos/navigation/nav_3d/mls_planner/odom_body_frame.py",
+        "dimos/navigation/nav_3d/mls_planner/transformer.py"
+      ],
+      "tests": [
+        {
+          "exists": true,
+          "path": "tests/test_native_terrain3d.py"
+        },
+        {
+          "exists": true,
+          "path": "tests/test_native_terrain_controller.py"
+        }
+      ]
+    },
+    "topology": {
+      "implementation": [
+        {
+          "exists": true,
+          "path": "robot_brain/navigation/topology.py"
+        }
+      ],
+      "source_files": [
+        "dimos/navigation/topology.py"
+      ],
+      "tests": [
+        {
+          "exists": true,
+          "path": "tests/test_native_topology.py"
+        }
+      ]
+    },
+    "visual": {
+      "implementation": [
+        {
+          "exists": true,
+          "path": "robot_brain/navigation/visual_navigation.py"
+        },
+        {
+          "exists": true,
+          "path": "robot_brain/navigation/visual_controller.py"
+        }
+      ],
+      "source_files": [
+        "dimos/navigation/bbox_navigation.py",
+        "dimos/navigation/visual/query.py",
+        "dimos/navigation/visual_servoing/detection_navigation.py",
+        "dimos/navigation/visual_servoing/visual_servoing_2d.py",
+        "dimos/skills/visual_navigation_skills.py"
+      ],
+      "tests": [
+        {
+          "exists": true,
+          "path": "tests/test_native_visual_navigation.py"
+        },
+        {
+          "exists": true,
+          "path": "tests/test_native_visual_controller.py"
+        }
+      ]
+    }
+  },
+  "missing_evidence": [],
+  "ok": true,
+  "source_file_count": 221,
+  "unclassified": []
+}

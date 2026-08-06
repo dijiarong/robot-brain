@@ -1,0 +1,22 @@
+{
+  "collected_at": "2026-08-06T12:00:00+08:00",
+  "host": "unreachable",
+  "note": "Orin SSH unreachable from laptop at collection time (mid360 HostName 10.10.153.15 timeout; 10.10.152.100 ping ok but sshd refused). Re-run scripts/collect_orin_nav_baseline.sh on Orin after Navigation-only bringup.",
+  "uptime_seconds": null,
+  "nproc": null,
+  "loadavg": null,
+  "memory": null,
+  "navigation_stack_detected": null,
+  "ffmpeg_detected": null,
+  "robot_brain_detected": null,
+  "go2_webrtc_detected": null,
+  "expectation": {
+    "ffmpeg_detected": false,
+    "robot_brain_detected": false,
+    "go2_webrtc_detected": false,
+    "navigation_stack_detected": true
+  },
+  "ok": false,
+  "collection_status": "pending_orin_ssh",
+  "top_cpu": []
+}

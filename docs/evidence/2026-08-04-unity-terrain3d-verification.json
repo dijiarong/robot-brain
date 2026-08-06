@@ -1,0 +1,37 @@
+{
+  "elevation_gain_m": 0.0003054363568357165,
+  "goal_xyz": [
+    1.8895611764705882,
+    2.6957270588235294,
+    0.0001417645882352941
+  ],
+  "input": "/Users/dijia/project/topsun_dimos/data/unity_sim_x86/traversable_area.ply",
+  "input_kind": "pointcloud_file",
+  "input_points": 62496,
+  "input_sha256": "eeebff9affa2a445ea4840af3d07b203dec6dc0931e8dc74a8a4024689d8b69d",
+  "largest_xy_component": 1771,
+  "loaded_forbidden_modules": [],
+  "ok": true,
+  "path_length_m": 22.547169113555157,
+  "path_nodes": 106,
+  "safety": {
+    "failures": [],
+    "finite_traversal_costs": true,
+    "maximum_slope_degrees": 0.01979694691975033,
+    "maximum_step_m": 7.636355555555542e-05,
+    "minimum_clearance_m": 0.2,
+    "ok": true
+  },
+  "start_xyz": [
+    -6.501575555555555,
+    -12.505983333333333,
+    0.003041093888888889
+  ],
+  "surface_nodes": 4655,
+  "timings_ms": {
+    "build": 1169.0406249836087,
+    "component_select": 6.004082970321178,
+    "load": 18.25666707009077,
+    "plan": 9.024625178426504
+  }
+}

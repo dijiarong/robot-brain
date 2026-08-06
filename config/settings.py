@@ -42,7 +42,8 @@ class Settings:
 
     # External navigation provider. auto = Fake on mock, disabled on real robot;
     # nav2 = connect to the topsun-bot/Navigation ROS2 graph lazily;
-    # direct_go2 = bounded local goals using built-in odom + LiDAR.
+    # direct_go2 = straight bounded local goals; native_go2 = robot-brain-owned
+    # costmap + A* + replanning using built-in odom and LiDAR.
     navigation_backend: str = field(
         default_factory=lambda: os.getenv("RDB_NAVIGATION_BACKEND", "auto")
     )
@@ -99,11 +100,47 @@ class Settings:
     )
     direct_nav_reach_tolerance_yaw_deg: float = field(
         default_factory=lambda: float(
-            os.getenv("RDB_DIRECT_NAV_REACH_TOLERANCE_YAW_DEG", "2.0")
+            os.getenv("RDB_DIRECT_NAV_REACH_TOLERANCE_YAW_DEG", "5.0")
         )
     )
     direct_nav_require_robotodom: bool = field(
         default_factory=lambda: _env_bool("RDB_DIRECT_NAV_REQUIRE_ROBOTODOM", True)
+    )
+    native_nav_map_size_m: float = field(
+        default_factory=lambda: float(os.getenv("RDB_NATIVE_NAV_MAP_SIZE_M", "7.0"))
+    )
+    native_nav_resolution_m: float = field(
+        default_factory=lambda: float(os.getenv("RDB_NATIVE_NAV_RESOLUTION_M", "0.10"))
+    )
+    native_nav_robot_radius_m: float = field(
+        default_factory=lambda: float(os.getenv("RDB_NATIVE_NAV_ROBOT_RADIUS_M", "0.30"))
+    )
+    native_nav_emergency_stop_m: float = field(
+        default_factory=lambda: float(os.getenv("RDB_NATIVE_NAV_EMERGENCY_STOP_M", "0.25"))
+    )
+    native_nav_max_no_path_replans: int = field(
+        # Remote WebRTC LiDAR can need several fresh frames after the posture
+        # sequence before a narrow detour is consistently visible.  Retries
+        # remain bounded and every no-path cycle commands stop.
+        default_factory=lambda: int(os.getenv("RDB_NATIVE_NAV_MAX_NO_PATH_REPLANS", "10"))
+    )
+    native_nav_trace_path: str = field(
+        default_factory=lambda: os.getenv("RDB_NATIVE_NAV_TRACE_PATH", "")
+    )
+    native_nav_replay_path: str = field(
+        default_factory=lambda: os.getenv("RDB_NATIVE_NAV_REPLAY_PATH", "")
+    )
+    native_nav_map_path: str = field(
+        default_factory=lambda: os.getenv("RDB_NATIVE_NAV_MAP_PATH", "")
+    )
+    native_nav_min_replan_interval_s: float = field(
+        default_factory=lambda: float(os.getenv("RDB_NATIVE_NAV_MIN_REPLAN_INTERVAL_S", "0.10"))
+    )
+    native_nav_pose_graph_enabled: bool = field(
+        default_factory=lambda: _env_bool("RDB_NATIVE_NAV_POSE_GRAPH_ENABLED", False)
+    )
+    native_nav_max_acceleration_mps2: float = field(
+        default_factory=lambda: float(os.getenv("RDB_NATIVE_NAV_MAX_ACCELERATION_MPS2", "1.0"))
     )
 
     # Local persistence.
@@ -175,15 +212,25 @@ class Settings:
     unitree_motion_mode: str = field(
         default_factory=lambda: os.getenv("RDB_UNITREE_MOTION_MODE", "mcf")
     )
+    # On service start (live webrtc/sdk transports only), run the wake sequence
+    # stand_up → balance_stand → free_walk → SwitchJoystick so the Go2 stands up
+    # even when it booted lying down. Only effective with motion enabled.
+    unitree_auto_stand: bool = field(
+        default_factory=lambda: _env_bool("RDB_UNITREE_AUTO_STAND", True)
+    )
     unitree_max_speed: float = field(
-        default_factory=lambda: float(os.getenv("RDB_UNITREE_MAX_SPEED", "0.2"))
+        default_factory=lambda: float(os.getenv("RDB_UNITREE_MAX_SPEED", "0.35"))
     )
     unitree_max_step: float = field(
         default_factory=lambda: float(os.getenv("RDB_UNITREE_MAX_STEP", "2.0"))
     )
     # Velocity-teleop (joystick "drive") safety clamps.
     unitree_max_yaw_speed: float = field(
-        default_factory=lambda: float(os.getenv("RDB_UNITREE_MAX_YAW_SPEED", "0.3"))
+        default_factory=lambda: float(os.getenv("RDB_UNITREE_MAX_YAW_SPEED", "0.8"))
+    )
+    # Go2 Sport SpeedLevel after FreeWalk (1=slow … higher=faster). Dashboard WASD uses 2.
+    unitree_speed_level: int = field(
+        default_factory=lambda: max(1, min(5, int(os.getenv("RDB_UNITREE_SPEED_LEVEL", "2"))))
     )
     unitree_max_drive_duration: float = field(
         default_factory=lambda: float(os.getenv("RDB_UNITREE_MAX_DRIVE_DURATION", "0.5"))
@@ -222,6 +269,11 @@ class Settings:
     )
     unitree_video_relay_port: int = field(
         default_factory=lambda: int(os.getenv("RDB_UNITREE_VIDEO_RELAY_PORT", "5000"))
+    )
+    # Defer ffmpeg video/audio relays until ensure_media_relays() / API click.
+    # Prefer true when co-located with Mid-360 Nav2 or when brain is lean.
+    unitree_media_on_demand: bool = field(
+        default_factory=lambda: _env_bool("RDB_UNITREE_MEDIA_ON_DEMAND", False)
     )
     # Go2 audio ↔ topsun_robot_service (Opus RTP :5005 out, :5010 in from browser mic).
     unitree_audio_relay: bool = field(

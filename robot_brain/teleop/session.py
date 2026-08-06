@@ -25,6 +25,7 @@ from uuid import uuid4
 
 from config.settings import Settings
 from robot_brain.actuation.unitree import UnitreeRobot
+from robot_brain.navigation.base import NavigationClient, NavigationStatus
 
 
 class ControlEventType(str, Enum):
@@ -88,8 +89,14 @@ class TeleopSession:
     affect lease/deadman decisions.
     """
 
-    def __init__(self, robot: UnitreeRobot, settings: Settings) -> None:
+    def __init__(
+        self,
+        robot: UnitreeRobot,
+        settings: Settings,
+        navigation: NavigationClient | None = None,
+    ) -> None:
         self._robot = robot
+        self._navigation = navigation
         self._deadman_s = max(0.0, settings.teleop_deadman_ms / 1000.0)
         self._lease_ttl_s = max(0.0, settings.teleop_lease_ttl_ms / 1000.0)
         self._chunk_s = max(0.05, settings.teleop_chunk_seconds)
@@ -118,11 +125,39 @@ class TeleopSession:
             self._lease_id = uuid4().hex
             self._operator = operator_id
             self._lease_expires = now + ttl_s
-            return LeaseResult(
+            granted = LeaseResult(
                 granted=True,
                 lease_id=self._lease_id,
                 expires_at=self._lease_expires,
             )
+        # Manual control has priority, but is not allowed to overlap navigation.
+        # Cancel outside the teleop lock because providers may wait for their
+        # motion task to stop. The caller cannot submit a setpoint before this
+        # acquire call returns.
+        if self._navigation is not None:
+            try:
+                state = await self._navigation.get_state()
+                if state.status == NavigationStatus.ACTIVE:
+                    canceled = await self._navigation.cancel(state.goal_id)
+                    if canceled.status not in {
+                        NavigationStatus.CANCELED,
+                        NavigationStatus.IDLE,
+                    }:
+                        raise RuntimeError(f"navigation remained {canceled.status.value}")
+                    await self.events.put(ControlEvent(
+                        ControlEventType.PREEMPTED,
+                        f"navigation {state.goal_id or ''} canceled for teleop",
+                    ))
+            except Exception as exc:
+                async with self._lock:
+                    if granted.lease_id == self._lease_id:
+                        self._clear_lease_locked()
+                await self._robot.stop("teleop acquire could not preempt navigation")
+                return LeaseResult(
+                    granted=False,
+                    reason=f"navigation preemption failed: {exc}",
+                )
+        return granted
 
     async def release_lease(self, lease_id: str) -> bool:
         """Release the lease and stop driving. No-op if *lease_id* is stale."""
@@ -166,9 +201,14 @@ class TeleopSession:
             self._setpoint = _Setpoint(vx=vx, vy=vy, vyaw=vyaw, at=now)
             self._lease_expires = now + self._lease_ttl_s
 
-            if self._setpoint.is_zero():
-                await self._end_drive_locked(release=True)
-            elif self._drive_task is None or self._drive_task.done():
+            # A zero setpoint stops the robot through the running stream rather
+            # than tearing it down: rebuilding the stream costs enough latency
+            # to make a quick direction change (forward → reverse) feel stuck.
+            # The deadman still ends the drive once setpoints stop arriving.
+            if (
+                not self._setpoint.is_zero()
+                and (self._drive_task is None or self._drive_task.done())
+            ):
                 self._drive_task = asyncio.create_task(self._drive_loop(self._lease_id))
         await self.events.put(ControlEvent(ControlEventType.ACCEPTED))
         return SetpointResult(True)
@@ -180,6 +220,13 @@ class TeleopSession:
             await self._end_drive_locked(release=False)
             await self._robot.stop(reason or "teleop emergency stop")
             self._clear_lease_locked()
+        if self._navigation is not None:
+            try:
+                await self._navigation.cancel()
+            except Exception:
+                # Robot.stop above is the hard safety action; provider state
+                # synchronization is best-effort after physical motion stopped.
+                pass
         await self.events.put(ControlEvent(ControlEventType.STOPPED, reason or "estop"))
 
     # ----------------------------------------------------------------- internal

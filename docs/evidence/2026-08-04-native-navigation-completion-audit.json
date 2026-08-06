@@ -1,0 +1,232 @@
+{
+  "capabilities": [
+    {
+      "external_pending": [
+        {
+          "gate": "go2_read_only_sensor_report",
+          "reports": []
+        },
+        {
+          "gate": "go2_live_motion_suite",
+          "reports": []
+        }
+      ],
+      "external_satisfied": [],
+      "id": "sensors_transport",
+      "offline_artifacts_ok": true,
+      "requirement": "Go2 authoritative odom, LiDAR, transforms, freshness, frame gates and safe cmd_vel transport",
+      "status": "external_pending"
+    },
+    {
+      "external_pending": [
+        {
+          "gate": "go2_mapping_replay",
+          "reports": []
+        }
+      ],
+      "external_satisfied": [],
+      "id": "mapping_storage",
+      "offline_artifacts_ok": true,
+      "requirement": "Point filtering, sparse voxel map, occupancy/costmap, inflation, free-space carving, bounded capacity and atomic versioned persistence",
+      "status": "external_pending"
+    },
+    {
+      "external_pending": [
+        {
+          "gate": "go2_live_motion_suite",
+          "reports": []
+        }
+      ],
+      "external_satisfied": [],
+      "id": "planning_control",
+      "offline_artifacts_ok": true,
+      "requirement": "Safe goal search, A*, path clearance, following, dynamic stop/replan, arrival and final yaw",
+      "status": "external_pending"
+    },
+    {
+      "external_pending": [
+        {
+          "gate": "go2_live_motion_suite",
+          "reports": []
+        },
+        {
+          "gate": "go2_live_teleop_estop_arbitration",
+          "reports": []
+        }
+      ],
+      "external_satisfied": [],
+      "id": "failure_arbitration",
+      "offline_artifacts_ok": true,
+      "requirement": "Cancel, estop, timeout, no path, localization loss, stale sensors, no progress and teleop ownership arbitration",
+      "status": "external_pending"
+    },
+    {
+      "external_pending": [
+        {
+          "gate": "go2_relocalization_replay",
+          "reports": []
+        }
+      ],
+      "external_satisfied": [],
+      "id": "relocalization_global_navigation",
+      "offline_artifacts_ok": true,
+      "requirement": "Initial/global bounded relocalization, quality gate, map-to-odom, merge and persistent absolute goals",
+      "status": "external_pending"
+    },
+    {
+      "external_pending": [
+        {
+          "gate": "go2_closed_loop_replay",
+          "reports": []
+        }
+      ],
+      "external_satisfied": [],
+      "id": "pose_graph_loop_closure",
+      "offline_artifacts_ok": true,
+      "requirement": "Scan-verified loop constraints, bounded PGO, correction quality gates and map-frame isolation",
+      "status": "external_pending"
+    },
+    {
+      "external_pending": [
+        {
+          "gate": "go2_frontier_exploration_trace",
+          "reports": []
+        }
+      ],
+      "external_satisfied": [],
+      "id": "frontier_exploration",
+      "offline_artifacts_ok": true,
+      "requirement": "Frontier extraction/scoring/blacklist, information-gain termination and cancelable exploration",
+      "status": "external_pending"
+    },
+    {
+      "external_pending": [
+        {
+          "gate": "go2_four_strategy_patrol_traces",
+          "reports": []
+        }
+      ],
+      "external_satisfied": [],
+      "id": "patrol_coverage",
+      "offline_artifacts_ok": true,
+      "requirement": "Coverage/frontier/random/least-visited routes and cancelable multi-cycle execution",
+      "status": "external_pending"
+    },
+    {
+      "external_pending": [
+        {
+          "gate": "go2_visual_servo_trace",
+          "reports": []
+        }
+      ],
+      "external_satisfied": [],
+      "id": "visual_navigation",
+      "offline_artifacts_ok": true,
+      "requirement": "BBox goals, conservative target matching and continuous 2D/3D visual servo with safe reacquisition",
+      "status": "external_pending"
+    },
+    {
+      "external_pending": [
+        {
+          "gate": "go2_mid360_terrain_replay",
+          "reports": []
+        },
+        {
+          "gate": "go2_terrain_execution_trace",
+          "reports": []
+        },
+        {
+          "gate": "go2_tare_exploration_trace",
+          "reports": []
+        }
+      ],
+      "external_satisfied": [],
+      "id": "terrain_mls_tare",
+      "offline_artifacts_ok": true,
+      "requirement": "Rolling terrain map, MLS planning, safety overlays, 3D execution and TARE-style exploration",
+      "status": "external_pending"
+    },
+    {
+      "external_pending": [],
+      "external_satisfied": [],
+      "id": "diagnostics_replay",
+      "offline_artifacts_ok": true,
+      "requirement": "Structured state/failures, JSONL trace, immutable manifests, sensor replay and offline reports",
+      "status": "evidence_ready"
+    },
+    {
+      "external_pending": [],
+      "external_satisfied": [
+        {
+          "gate": "native_service_integration_report",
+          "reports": [
+            "docs/evidence/native_service_integration_report-registered.json"
+          ]
+        }
+      ],
+      "id": "runtime_integration",
+      "offline_artifacts_ok": true,
+      "requirement": "NavigationClient integration with skills, tools, memory, safety, teleop, service and explicit live/motion gates",
+      "status": "evidence_ready"
+    }
+  ],
+  "complete": false,
+  "external_pending": [
+    "sensors_transport:go2_read_only_sensor_report",
+    "sensors_transport:go2_live_motion_suite",
+    "mapping_storage:go2_mapping_replay",
+    "planning_control:go2_live_motion_suite",
+    "failure_arbitration:go2_live_motion_suite",
+    "failure_arbitration:go2_live_teleop_estop_arbitration",
+    "relocalization_global_navigation:go2_relocalization_replay",
+    "pose_graph_loop_closure:go2_closed_loop_replay",
+    "frontier_exploration:go2_frontier_exploration_trace",
+    "patrol_coverage:go2_four_strategy_patrol_traces",
+    "visual_navigation:go2_visual_servo_trace",
+    "terrain_mls_tare:go2_mid360_terrain_replay",
+    "terrain_mls_tare:go2_terrain_execution_trace",
+    "terrain_mls_tare:go2_tare_exploration_trace"
+  ],
+  "failures": [],
+  "matrix_sha256": "69e8fef9350235c3fe1c297045db913e2ac27b4389372eff3d56b63666085538",
+  "offline_artifacts_ok": true,
+  "schema_version": 1,
+  "verifiers": [
+    {
+      "command": [
+        "/Users/dijia/miniconda3/bin/python",
+        "-m",
+        "pytest",
+        "-q"
+      ],
+      "ok": true,
+      "returncode": 0,
+      "stderr_tail": "[unitree_webrtc] atexit — Go2 slot will be released\n",
+      "stdout_tail": ".............................................ssss....................... [  9%]\n........................................................................ [ 19%]\n........................................................................ [ 29%]\n........................................................................ [ 39%]\n........................................................................ [ 48%]\n........................................................................ [ 58%]\n........................................................................ [ 68%]\n........................................................................ [ 78%]\n........................................................................ [ 87%]\n............................................................. [ 96%]\n............................                                             [100%]\n=============================== warnings summary ===============================\nscripts/verify_native_terrain3d.py:22\n  /Users/dijia/project/robot-brain/scripts/verify_native_terrain3d.py:22: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.\n    return _original_import(name, globals, locals, fromlist, level)\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n733 passed, 4 skipped, 1 warning, 11 subtests passed in 11.48s\n"
+    },
+    {
+      "command": [
+        "/Users/dijia/miniconda3/bin/python",
+        "scripts/verify_native_navigation_offline.py"
+      ],
+      "ok": true,
+      "returncode": 0,
+      "stderr_tail": "",
+      "stdout_tail": "{\n  \"final_pose\": {\n    \"frame_id\": \"odom\",\n    \"x_m\": 0.6866675240173529,\n    \"y_m\": -0.07629918263406799,\n    \"yaw_degrees\": 0.0\n  },\n  \"forbidden_dependencies\": [\n    \"dimos\",\n    \"rclpy\",\n    \"open3d\",\n    \"reactivex\"\n  ],\n  \"loaded_forbidden_modules\": [],\n  \"ok\": true,\n  \"path_points\": 2,\n  \"provider\": \"native_go2\",\n  \"replan_count\": 13,\n  \"status\": \"succeeded\",\n  \"stop_reason\": \"goal_reached\"\n}\n"
+    },
+    {
+      "command": [
+        "/Users/dijia/miniconda3/bin/python",
+        "scripts/audit_dimos_navigation_extraction.py",
+        "--dimos-root",
+        "/Users/dijia/project/topsun_dimos",
+        "--robot-root",
+        "/Users/dijia/project/robot-brain"
+      ],
+      "ok": true,
+      "returncode": 0,
+      "stderr_tail": "",
+      "stdout_tail": "s/navigation/nav_3d/evaluator/evaluator.py\",\n        \"dimos/navigation/nav_3d/evaluator/mesh_loader.py\",\n        \"dimos/navigation/nav_3d/evaluator/scenarios.py\",\n        \"dimos/navigation/nav_3d/mls_planner/goal_relay.py\",\n        \"dimos/navigation/nav_3d/mls_planner/mls_planner.py\",\n        \"dimos/navigation/nav_3d/mls_planner/mls_planner_native.py\",\n        \"dimos/navigation/nav_3d/mls_planner/odom_body_frame.py\",\n        \"dimos/navigation/nav_3d/mls_planner/transformer.py\"\n      ],\n      \"tests\": [\n        {\n          \"exists\": true,\n          \"path\": \"tests/test_native_terrain3d.py\"\n        },\n        {\n          \"exists\": true,\n          \"path\": \"tests/test_native_terrain_controller.py\"\n        }\n      ]\n    },\n    \"topology\": {\n      \"implementation\": [\n        {\n          \"exists\": true,\n          \"path\": \"robot_brain/navigation/topology.py\"\n        }\n      ],\n      \"source_files\": [\n        \"dimos/navigation/topology.py\"\n      ],\n      \"tests\": [\n        {\n          \"exists\": true,\n          \"path\": \"tests/test_native_topology.py\"\n        }\n      ]\n    },\n    \"visual\": {\n      \"implementation\": [\n        {\n          \"exists\": true,\n          \"path\": \"robot_brain/navigation/visual_navigation.py\"\n        },\n        {\n          \"exists\": true,\n          \"path\": \"robot_brain/navigation/visual_controller.py\"\n        }\n      ],\n      \"source_files\": [\n        \"dimos/navigation/bbox_navigation.py\",\n        \"dimos/navigation/visual/query.py\",\n        \"dimos/navigation/visual_servoing/detection_navigation.py\",\n        \"dimos/navigation/visual_servoing/visual_servoing_2d.py\",\n        \"dimos/skills/visual_navigation_skills.py\"\n      ],\n      \"tests\": [\n        {\n          \"exists\": true,\n          \"path\": \"tests/test_native_visual_navigation.py\"\n        },\n        {\n          \"exists\": true,\n          \"path\": \"tests/test_native_visual_controller.py\"\n        }\n      ]\n    }\n  },\n  \"missing_evidence\": [],\n  \"ok\": true,\n  \"source_file_count\": 221,\n  \"unclassified\": []\n}\n"
+    }
+  ]
+}

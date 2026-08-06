@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 import time
 from typing import Any
 from uuid import uuid4
@@ -254,9 +255,81 @@ class AgentRuntime:
                     reach_tolerance_m=settings.direct_nav_reach_tolerance_m,
                     reach_tolerance_yaw_deg=settings.direct_nav_reach_tolerance_yaw_deg,
                 )
+            elif settings.navigation_backend == "native_go2":
+                from robot_brain.actuation.unitree import UnitreeRobot
+                from robot_brain.navigation.native_go2 import NativeGo2NavigationClient
+                from robot_brain.navigation.diagnostics import NavigationTraceWriter
+                from robot_brain.navigation.map_store import SparseVoxelMap
+                from robot_brain.navigation.replay import NavigationReplayWriter
+                from robot_brain.navigation.pose_graph import OnlinePoseGraphTracker
+                from robot_brain.navigation.sensors import UnitreeNavigationSensorProvider
+
+                if not isinstance(robot, UnitreeRobot):
+                    raise ValueError("native_go2 navigation requires a UnitreeRobot")
+                transport = robot.transport
+                if not all(
+                    hasattr(transport, name)
+                    for name in ("read_lidar_snapshot", "lidar_age_seconds")
+                ):
+                    raise ValueError(
+                        "native_go2 navigation requires a transport with built-in LiDAR"
+                    )
+                sensors = UnitreeNavigationSensorProvider(
+                    transport,
+                    max_pose_age_s=settings.odom_max_age_seconds,
+                    max_pointcloud_age_s=settings.direct_nav_pointcloud_max_age_s,
+                    require_authoritative_odom=settings.direct_nav_require_robotodom,
+                )
+                configured_map = Path(settings.native_nav_map_path) if settings.native_nav_map_path else None
+                voxel_map = (
+                    SparseVoxelMap.load(configured_map)
+                    if configured_map is not None and configured_map.exists()
+                    else SparseVoxelMap(resolution_m=settings.native_nav_resolution_m)
+                )
+                navigation = NativeGo2NavigationClient(
+                    robot,
+                    sensors,
+                    linear_speed_mps=settings.unitree_max_speed,
+                    segment_duration_s=settings.direct_nav_segment_duration_s,
+                    map_size_m=settings.native_nav_map_size_m,
+                    resolution_m=settings.native_nav_resolution_m,
+                    robot_radius_m=settings.native_nav_robot_radius_m,
+                    emergency_stop_m=settings.native_nav_emergency_stop_m,
+                    reach_tolerance_m=settings.direct_nav_reach_tolerance_m,
+                    reach_tolerance_yaw_deg=settings.direct_nav_reach_tolerance_yaw_deg,
+                    min_progress_m=settings.odom_progress_min_m,
+                    max_no_progress_segments=settings.direct_nav_no_progress_segments,
+                    max_no_path_replans=settings.native_nav_max_no_path_replans,
+                    min_replan_interval_s=settings.native_nav_min_replan_interval_s,
+                    settle_s=settings.direct_nav_odom_settle_s,
+                    trace_writer=(
+                        NavigationTraceWriter(
+                            settings.native_nav_trace_path,
+                            provider="native_go2",
+                            config={
+                                "map_size_m": settings.native_nav_map_size_m,
+                                "resolution_m": settings.native_nav_resolution_m,
+                                "robot_radius_m": settings.native_nav_robot_radius_m,
+                            },
+                        )
+                        if settings.native_nav_trace_path else None
+                    ),
+                    voxel_map=voxel_map,
+                    persistent_map=configured_map is not None and configured_map.exists(),
+                    replay_writer=(
+                        NavigationReplayWriter(settings.native_nav_replay_path)
+                        if settings.native_nav_replay_path else None
+                    ),
+                    pose_graph_tracker=(
+                        OnlinePoseGraphTracker()
+                        if settings.native_nav_pose_graph_enabled else None
+                    ),
+                    max_acceleration_mps2=settings.native_nav_max_acceleration_mps2,
+                )
             elif settings.robot_backend == "mock" and settings.navigation_backend in {"auto", "fake"}:
                 navigation = FakeNavigationClient()
 
+        visual_recognizer = None
         if (
             navigation is not None
             and passability is not None
@@ -271,6 +344,7 @@ class AgentRuntime:
 
             spatial_store = SpatialMemoryStore(settings.memory_db_path)
             recognizer = ObjectRecognizer(passability._client)
+            visual_recognizer = recognizer
             spatial_skill_set = [
                 RememberRoomSkill(
                     spatial_store, passability_frame_source, recognizer, navigation
@@ -294,6 +368,26 @@ class AgentRuntime:
                 LocalizationGetStateTool(navigation),
             ]
             navigation_skill_set = navigation_skills(navigation)
+            from robot_brain.navigation.native_go2 import NativeGo2NavigationClient
+            if isinstance(navigation, NativeGo2NavigationClient):
+                from robot_brain.skills.builtin.native_navigation import native_navigation_skills
+                from robot_brain.tools.builtin.native_navigation import (
+                    NativeMapGetStateTool,
+                    NativeMapSaveTool,
+                    NativeTerrainPlanTool,
+                )
+                navigation_skill_set += native_navigation_skills(
+                    navigation,
+                    terrain_motion_enabled=settings.unitree_motion_mode == "mcf",
+                    visual_frames=passability_frame_source,
+                    visual_recognizer=visual_recognizer,
+                )
+                navigation_tools.append(NativeMapGetStateTool(navigation))
+                navigation_tools.append(NativeTerrainPlanTool(navigation))
+                if settings.native_nav_map_path:
+                    navigation_tools.append(
+                        NativeMapSaveTool(navigation, settings.native_nav_map_path)
+                    )
         if settings.robot_backend == "unitree":
             from robot_brain.skills.builtin.go2_catalog import go2_skills
             from robot_brain.tools.builtin import go2_tools
@@ -609,7 +703,11 @@ class AgentRuntime:
                 logger.warning("passability aclose failed: %s", exc)
         elif self.passability_frame_source is not None:
             try:
-                self.passability_frame_source.stop()
+                frame_aclose = getattr(self.passability_frame_source, "aclose", None)
+                if callable(frame_aclose):
+                    await frame_aclose()
+                else:
+                    self.passability_frame_source.stop()
             except Exception as exc:  # noqa: BLE001
                 logger.warning("frame source stop failed: %s", exc)
         navigation_aclose = getattr(self.context.navigation, "aclose", None)

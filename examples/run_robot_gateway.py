@@ -90,14 +90,14 @@ async def main() -> None:
             sys.exit(1)
 
         # Import browser gateway stack only AFTER Go2 WebRTC is up.
+        from robot_brain.control.authority import session_or_create
         from robot_brain.gateway.gateway import RobotGateway
-        from robot_brain.teleop.session import TeleopSession
 
         robot = UnitreeRobot(transport, settings)
         if prep_stand:
             await prep_locomotion(robot)
 
-        session = TeleopSession(robot, settings)
+        session = session_or_create(robot, settings)
         gateway = RobotGateway(transport, session, settings)
 
         print(

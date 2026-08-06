@@ -1,0 +1,257 @@
+{
+  "acceptance": {
+    "cancel_latency_s": null,
+    "emergency_stop_events": 0,
+    "expected_terminal": "succeeded",
+    "failures": [],
+    "maximum_path_deviation_m": 0.050000000000000315,
+    "operator_setup": "clear 0.3 m corridor",
+    "plan_events": 1,
+    "trajectory": {
+      "forward_progress_m": 0.2309937186863577,
+      "maximum_lateral_deviation_m": 0.04313042578560829,
+      "motion_samples": 1
+    }
+  },
+  "command_audit": [
+    {
+      "action": "set_posture",
+      "posture": "stand_up",
+      "timestamp": 1785893360.696527
+    },
+    {
+      "action": "set_posture",
+      "posture": "balance_stand",
+      "timestamp": 1785893361.704963
+    },
+    {
+      "action": "set_posture",
+      "posture": "free_walk",
+      "timestamp": 1785893362.716028
+    },
+    {
+      "action": "enable_omni_teleop",
+      "timestamp": 1785893363.754674
+    },
+    {
+      "action": "drive",
+      "duration": 0.7284313590846838,
+      "elapsed": 1.0680639743804932,
+      "end_reason": "completed",
+      "original": {
+        "duration": 0.7284313590846838,
+        "vx": 0.34320323649182194,
+        "vy": 0.06864064729836475,
+        "vyaw": 0.0
+      },
+      "post_state": {
+        "battery_level": 78.68438541666666,
+        "connected": true,
+        "error_code": 100,
+        "heading_degrees": -49.26445300654943,
+        "imu_rpy": [
+          -0.061363,
+          0.009708,
+          -0.859826
+        ],
+        "is_moving": false,
+        "is_standing": true,
+        "pose_frame_id": "odom",
+        "pose_source": "unitree_robotodom",
+        "pose_timestamp": 1785893364.938249,
+        "position": {
+          "x": -0.255458,
+          "y": 0.149068
+        },
+        "sport_mode": 0,
+        "ultrasonic": null,
+        "velocity": [
+          -0.006078,
+          -0.007701,
+          -0.002884
+        ]
+      },
+      "pre_state": {
+        "battery_level": 79.51438541666666,
+        "connected": true,
+        "error_code": 100,
+        "heading_degrees": -51.30515477777077,
+        "imu_rpy": [
+          -0.038991,
+          -0.011019,
+          -0.895473
+        ],
+        "is_moving": false,
+        "is_standing": true,
+        "pose_frame_id": "odom",
+        "pose_source": "unitree_robotodom",
+        "pose_timestamp": 1785893363.8448648,
+        "position": {
+          "x": -0.439088,
+          "y": 0.293091
+        },
+        "sport_mode": 0,
+        "ultrasonic": null,
+        "velocity": [
+          -0.000547,
+          -4.900839e-07,
+          -0.019228
+        ]
+      },
+      "success": true,
+      "timestamp": 1785893363.849397,
+      "vx": 0.34320323649182194,
+      "vy": 0.06864064729836475,
+      "vyaw": 0.0
+    },
+    {
+      "action": "stop",
+      "reason": "native navigation goal reached",
+      "timestamp": 1785893365.3163362
+    }
+  ],
+  "goal": {
+    "forward_m": 0.3,
+    "left_m": 0.0,
+    "max_duration_s": 30.0
+  },
+  "goal_id": "native-go2-560c0bcb5e7743ecbc0802e2839a198b",
+  "mode": "live",
+  "ok": true,
+  "pose_after": {
+    "frame_id": "odom",
+    "timestamp": 1785893365.4362555,
+    "x_m": -0.261699,
+    "y_m": 0.137963,
+    "yaw_deg": -48.69898677363346,
+    "z_m": 0.0
+  },
+  "pose_before": {
+    "frame_id": "odom",
+    "timestamp": 1785893363.755487,
+    "x_m": -0.43919,
+    "y_m": 0.293138,
+    "yaw_deg": -51.31398379143853,
+    "z_m": 0.0
+  },
+  "provider": "native_go2",
+  "scenario": "straight",
+  "sensors": {
+    "obstacle_frame": "base_link",
+    "point_count": 33202,
+    "pointcloud_age_seconds": 0.06072408286854625,
+    "pose": {
+      "frame_id": "odom",
+      "timestamp": 1785893358.6359284,
+      "x_m": -0.429507,
+      "y_m": 0.280501,
+      "yaw_deg": -51.35106071774591,
+      "z_m": 0.0
+    },
+    "pose_age_seconds": 0.040912624914199114,
+    "pose_source": "unitree_robotodom",
+    "ready": true,
+    "reason": null
+  },
+  "started_at": 1785893356.828628,
+  "state": {
+    "error_code": null,
+    "goal_id": "native-go2-560c0bcb5e7743ecbc0802e2839a198b",
+    "message": "relative goal reached",
+    "path": [
+      {
+        "frame_id": "odom",
+        "x_m": -0.3689082426905419,
+        "y_m": 0.28536145902765975,
+        "yaw_degrees": -51.31398379143853
+      },
+      {
+        "frame_id": "odom",
+        "x_m": -0.24389781001630714,
+        "y_m": 0.129244862464064,
+        "yaw_degrees": -51.31398379143853
+      }
+    ],
+    "pose": {
+      "frame_id": "odom",
+      "x_m": -0.26114,
+      "y_m": 0.139787,
+      "yaw_degrees": -48.85175596850805
+    },
+    "progress": 1.0,
+    "provider": "native_go2",
+    "ready": true,
+    "replan_count": 1,
+    "status": "succeeded",
+    "stop_reason": "goal_reached",
+    "updated_at": "2026-08-05T01:29:25.447212Z"
+  },
+  "stop_reason": "goal_reached",
+  "trace": [
+    {
+      "event": "goal_accepted",
+      "goal_id": "native-go2-560c0bcb5e7743ecbc0802e2839a198b",
+      "monotonic": 2190247.861214083,
+      "target_x_m": -0.2516743509886476,
+      "target_y_m": 0.05896310515460612,
+      "target_yaw_degrees": -51.313983791438545
+    },
+    {
+      "clearance_reference": "inflated_costmap",
+      "event": "path_clearance",
+      "goal_id": "native-go2-560c0bcb5e7743ecbc0802e2839a198b",
+      "minimum_clearance_m": 0.7211102550927979,
+      "monotonic": 2190247.902989291,
+      "replan_count": 1
+    },
+    {
+      "event": "plan",
+      "goal_id": "native-go2-560c0bcb5e7743ecbc0802e2839a198b",
+      "monotonic": 2190247.903581166,
+      "path_points": 2,
+      "remaining_m": 0.3,
+      "replan_count": 1
+    },
+    {
+      "event": "plan_geometry",
+      "goal_id": "native-go2-560c0bcb5e7743ecbc0802e2839a198b",
+      "monotonic": 2190247.903582416,
+      "path_xy": [
+        [
+          -0.3689082426905419,
+          0.28536145902765975
+        ],
+        [
+          -0.24389781001630714,
+          0.129244862464064
+        ]
+      ],
+      "replan_count": 1
+    },
+    {
+      "duration_s": 0.7284313590846838,
+      "event": "command",
+      "goal_id": "native-go2-560c0bcb5e7743ecbc0802e2839a198b",
+      "monotonic": 2190247.903582958,
+      "speed_scale": 1.0,
+      "vx_mps": 0.34320323649182194,
+      "vy_mps": 0.06864064729836475,
+      "yaw_rps": 0.0
+    },
+    {
+      "event": "motion_sample",
+      "goal_id": "native-go2-560c0bcb5e7743ecbc0802e2839a198b",
+      "monotonic": 2190249.341937666,
+      "x_m": -0.26114,
+      "y_m": 0.139787,
+      "yaw_degrees": -48.85175596850805
+    },
+    {
+      "event": "finished",
+      "goal_id": "native-go2-560c0bcb5e7743ecbc0802e2839a198b",
+      "monotonic": 2190249.5013985,
+      "status": "succeeded",
+      "stop_reason": null
+    }
+  ]
+}

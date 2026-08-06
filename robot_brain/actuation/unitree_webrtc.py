@@ -61,7 +61,7 @@ _SPORT_API_ID: dict[str, int] = {
     "free_walk": 2045,       # FreeWalk — omni locomotion on MCF (strafe/yaw need this)
     "sport_move": 1008,        # Move(vx, vy, vyaw) — omni velocity on sport API
     "switch_joystick": 1027, # SwitchJoystick — enable stick/Move control path
-    "speed_level": 1015,     # SpeedLevel — gait speed (1=slow for teleop)
+    "speed_level": 1015,     # SpeedLevel — gait speed (1=slow … 5=fast)
     "hello": 1016,           # Hello — built-in front-leg wave gesture
 }
 # Joystick (wireless controller) channel — emulates the remote/app sticks. This
@@ -607,8 +607,10 @@ async def _do_connect(
             exc, aes_key_set=bool(aes_key), remote=mode == "remote"
         ) from exc
 
+    media_started = False
     try:
         # Media relay / gateway need track consumers; pure control removes them.
+        # With media_on_demand, skip ffmpeg until ensure_media_relays().
         if not settings.unitree_dry_run:
             if settings.unitree_gateway:
                 # Match gRPC connect priming (outbound audio + video consumers) but
@@ -618,7 +620,13 @@ async def _do_connect(
 
                 prime_go2_video_for_connect(conn)
                 prime_go2_audio_for_connect(conn)
+                media_started = True
                 logger.info("Go2 WebRTC ready (gateway mode)")
+            elif settings.unitree_media_on_demand:
+                logger.info(
+                    "Go2 WebRTC connected; ffmpeg media relays deferred "
+                    "(RDB_UNITREE_MEDIA_ON_DEMAND=true)"
+                )
             else:
                 if settings.unitree_video_relay:
                     from robot_brain.media.go2_video_relay import start_go2_video_relay
@@ -628,6 +636,7 @@ async def _do_connect(
                         host=settings.unitree_video_relay_host,
                         port=settings.unitree_video_relay_port,
                     )
+                    media_started = True
                 if settings.unitree_audio_relay:
                     from robot_brain.media.go2_audio_relay import start_go2_audio_relay
 
@@ -638,13 +647,16 @@ async def _do_connect(
                         ingress_host=settings.unitree_audio_ingress_host,
                         ingress_port=settings.unitree_audio_ingress_port,
                     )
+                    media_started = True
 
         needs_media = (
             not settings.unitree_dry_run
             and (
                 settings.unitree_gateway
-                or settings.unitree_video_relay
-                or settings.unitree_audio_relay
+                or (
+                    not settings.unitree_media_on_demand
+                    and (settings.unitree_video_relay or settings.unitree_audio_relay)
+                )
             )
         )
         if hasattr(conn, "pc") and not needs_media:
@@ -655,7 +667,7 @@ async def _do_connect(
 
         lidar_requested = (
             settings.unitree_lidar_stream
-            or settings.navigation_backend == "direct_go2"
+            or settings.navigation_backend in {"direct_go2", "native_go2"}
         )
         lidar_switch_topic = RTC_TOPIC.get("ULIDAR_SWITCH")
         if lidar_requested and lidar_switch_topic:
@@ -674,6 +686,8 @@ async def _do_connect(
             "aes_key_set": bool(aes_key) if mode == "local" else False,
             "target": _connection_target(settings),
             "ip_is_default": ip_is_default if mode == "local" else False,
+            "media_relays_started": media_started,
+            "media_on_demand": bool(settings.unitree_media_on_demand),
         }
 
         # Check current motion mode
@@ -752,6 +766,8 @@ class UnitreeWebRTCTransport(UnitreeTransport):
         self._transport_shutdown = False
         # On-connect callbacks (gateway re-attaches media after reconnect)
         self._on_connect_callbacks: list[Callable[[Any], None]] = []
+        # ffmpeg RTP relays (deferred when unitree_media_on_demand)
+        self._media_relays_started = False
 
         _install_shutdown_handlers()
 
@@ -789,9 +805,76 @@ class UnitreeWebRTCTransport(UnitreeTransport):
     def connection_state(self) -> ConnectionState:
         return self._conn_state
 
+    @property
+    def connection(self) -> Any:
+        """Expose the connected media session to service-owned read-only taps."""
+        return self._conn
+
     def add_on_connect(self, callback: Callable[[Any], None]) -> None:
         """Register a callback invoked after each successful (re)connect with the conn."""
         self._on_connect_callbacks.append(callback)
+
+    @property
+    def media_relays_started(self) -> bool:
+        return self._media_relays_started
+
+    def ensure_media_relays(self) -> dict[str, object]:
+        """Start deferred ffmpeg video/audio RTP relays (idempotent).
+
+        Call when an operator actually needs topsun/browser media. Safe no-op if
+        relays are disabled in settings, already started, or not connected.
+        """
+        if self._settings.unitree_dry_run:
+            return {"started": False, "reason": "dry_run"}
+        if self._settings.unitree_gateway:
+            return {"started": False, "reason": "gateway_uses_in_process_media"}
+        if self._media_relays_started:
+            return {"started": True, "reason": "already_running"}
+        conn = self._conn
+        if conn is None or not self._connected:
+            return {"started": False, "reason": "not_connected"}
+
+        started_video = False
+        started_audio = False
+        if self._settings.unitree_video_relay:
+            from robot_brain.media.go2_video_relay import start_go2_video_relay
+
+            start_go2_video_relay(
+                conn,
+                host=self._settings.unitree_video_relay_host,
+                port=self._settings.unitree_video_relay_port,
+            )
+            started_video = True
+        if self._settings.unitree_audio_relay:
+            from robot_brain.media.go2_audio_relay import start_go2_audio_relay
+
+            start_go2_audio_relay(
+                conn,
+                relay_host=self._settings.unitree_audio_relay_host,
+                relay_port=self._settings.unitree_audio_relay_port,
+                ingress_host=self._settings.unitree_audio_ingress_host,
+                ingress_port=self._settings.unitree_audio_ingress_port,
+            )
+            started_audio = True
+        if not started_video and not started_audio:
+            return {
+                "started": False,
+                "reason": "relays_disabled_in_settings",
+                "video": False,
+                "audio": False,
+            }
+        self._media_relays_started = True
+        logger.info(
+            "Go2 media relays started on demand (video=%s audio=%s)",
+            started_video,
+            started_audio,
+        )
+        return {
+            "started": True,
+            "reason": "started",
+            "video": started_video,
+            "audio": started_audio,
+        }
 
     @property
     def last_drive_end_reason(self) -> MotionEndReason | None:
@@ -1005,6 +1088,9 @@ class UnitreeWebRTCTransport(UnitreeTransport):
                         )
 
                     self._connected = True
+                    self._media_relays_started = bool(
+                        conn_info.get("media_relays_started")
+                    )
                     ready_event.set()
 
                     # Fire on-connect callbacks (gateway re-attaches media)
@@ -1027,7 +1113,17 @@ class UnitreeWebRTCTransport(UnitreeTransport):
                     ready_event.set()
 
             loop.create_task(async_connect())
-            loop.run_forever()
+            try:
+                loop.run_forever()
+            finally:
+                pending = asyncio.all_tasks(loop)
+                for task in pending:
+                    task.cancel()
+                if pending:
+                    loop.run_until_complete(
+                        asyncio.gather(*pending, return_exceptions=True)
+                    )
+                loop.close()
 
         self._bg_thread = threading.Thread(target=run_bg_loop, daemon=True)
         self._bg_thread.start()
@@ -1119,6 +1215,7 @@ class UnitreeWebRTCTransport(UnitreeTransport):
         shutdown paths both trigger this during process exit).
         """
         self._transport_shutdown = True
+        self._media_relays_started = False
         self._set_conn_state(ConnectionState.DISCONNECTING)
 
         # A dry-run/read-only session must not publish zero joystick frames or
@@ -1149,6 +1246,16 @@ class UnitreeWebRTCTransport(UnitreeTransport):
         self._last_lidar = None
         self._last_lidar_sensor_stamp = None
         self._last_robot_odom = None
+        loop = self._bg_loop
+        self._bg_loop = None
+        if loop is not None and loop.is_running():
+            loop.call_soon_threadsafe(loop.stop)
+        thread = self._bg_thread
+        self._bg_thread = None
+        if thread is not None and thread.is_alive():
+            await asyncio.to_thread(thread.join, 3.0)
+            if thread.is_alive():
+                logger.warning("WebRTC background thread did not stop within 3s")
         self._set_conn_state(ConnectionState.DISCONNECTED)
         logger.info("UnitreeWebRTCTransport disconnected")
 
@@ -1469,13 +1576,15 @@ class UnitreeWebRTCTransport(UnitreeTransport):
         )
 
     def _use_joystick_for_velocity(self, vx: float, vy: float, vyaw: float) -> bool:
-        """Pick drive channel: Move for strafe-only; joystick when yaw is involved."""
+        """Pick Move for pure translation/rotation; joystick only for motion arcs."""
         if not self._settings.unitree_webrtc_drive_via_move:
             return True
-        # MCF Move(1008) handles vy (strafe) but combined forward+turn arcs work on joystick.
-        if vyaw != 0.0:
+        # MCF Move(1008) handles vx, vy and pure yaw.  The virtual joystick is
+        # only needed for simultaneous translation+yaw arcs; on Remote 4G its
+        # short pure-yaw pulses can be acknowledged without sustained motion.
+        if vyaw != 0.0 and (vx != 0.0 or vy != 0.0):
             return True
-        return False  # pure vx or vy → Move
+        return False
 
     def _publish_drive_velocity(
         self, pub_sub: Any, vx: float, vy: float, vyaw: float
@@ -1488,12 +1597,17 @@ class UnitreeWebRTCTransport(UnitreeTransport):
         return "move(1008)"
 
     async def enable_omni_teleop(self) -> None:
-        """After FreeWalk: enable joystick/Move control and set a low speed level."""
+        """After FreeWalk: enable joystick/Move control and set gait SpeedLevel."""
+        level = max(1, min(5, int(getattr(self._settings, "unitree_speed_level", 2))))
         await self._publish_sport(
             _SPORT_API_ID["switch_joystick"], parameter={"data": True}
         )
-        await self._publish_sport(_SPORT_API_ID["speed_level"], parameter={"data": 1})
-        logger.info("WebRTC omni teleop enabled (SwitchJoystick + SpeedLevel=1)")
+        await self._publish_sport(
+            _SPORT_API_ID["speed_level"], parameter={"data": level}
+        )
+        logger.info(
+            "WebRTC omni teleop enabled (SwitchJoystick + SpeedLevel=%s)", level
+        )
 
     def _joystick_from_velocity(
         self, vx: float, vy: float, vyaw: float

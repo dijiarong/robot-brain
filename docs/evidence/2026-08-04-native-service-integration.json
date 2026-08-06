@@ -1,0 +1,40 @@
+{
+  "dry_run": true,
+  "motion_enabled": false,
+  "motion_gate_enforced": true,
+  "ok": true,
+  "provider": "native_go2",
+  "provider_type": "NativeGo2NavigationClient",
+  "registered_skills": [
+    "dock",
+    "explore",
+    "follow",
+    "go2_local_nav",
+    "nav_cancel",
+    "nav_explore",
+    "nav_go_relative",
+    "nav_go_terrain_relative",
+    "nav_go_to_bbox",
+    "nav_patrol",
+    "nav_relocalize",
+    "nav_terrain_explore",
+    "navigate",
+    "nudge",
+    "patrol",
+    "recognize",
+    "report",
+    "retreat",
+    "scan",
+    "stop"
+  ],
+  "registered_tools": [
+    "go2_drive_segment",
+    "localization_get_state",
+    "native_map_get_state",
+    "native_terrain_plan",
+    "nav_get_state",
+    "stop_motion"
+  ],
+  "service_health": true,
+  "skill_invocation": true
+}

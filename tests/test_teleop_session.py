@@ -95,11 +95,27 @@ class SetpointTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("stream_hold", _actions(self.robot))
         self.assertIn(ControlEventType.ACCEPTED, await _drain(self.session))
 
-    async def test_zero_setpoint_releases_drive(self) -> None:
+    async def test_zero_setpoint_keeps_stream_for_the_deadman_to_end(self) -> None:
         lease = await self.session.acquire_lease("op-1")
         await self.session.set_velocity(lease.lease_id, 0.1, 0.0, 0.0)
         await asyncio.sleep(0.02)
         await self.session.set_velocity(lease.lease_id, 0.0, 0.0, 0.0)
+        self.assertNotIn("release_drive", _actions(self.robot))
+
+    async def test_direction_reversal_reuses_the_running_stream(self) -> None:
+        lease = await self.session.acquire_lease("op-1")
+        await self.session.set_velocity(lease.lease_id, 0.2, 0.0, 0.0)
+        await asyncio.sleep(0.02)
+        await self.session.set_velocity(lease.lease_id, 0.0, 0.0, 0.0)
+        await self.session.set_velocity(lease.lease_id, -0.2, 0.0, 0.0)
+        await asyncio.sleep(0.02)
+        self.assertNotIn("release_drive", _actions(self.robot))
+
+    async def test_release_lease_stops_the_drive(self) -> None:
+        lease = await self.session.acquire_lease("op-1")
+        await self.session.set_velocity(lease.lease_id, 0.1, 0.0, 0.0)
+        await asyncio.sleep(0.02)
+        await self.session.release_lease(lease.lease_id)
         self.assertIn("release_drive", _actions(self.robot))
 
 

@@ -76,15 +76,9 @@ POSTURES: dict[str, str] = {
 async def prep_locomotion(robot: UnitreeRobot) -> None:
     """DimOS-style wake: stand_up → balance_stand → free_walk → omni teleop enable."""
     print("[Prep] stand_up → balance_stand → free_walk → SwitchJoystick ...")
-    await robot.set_posture("stand_up")
-    await asyncio.sleep(3.0)
-    await robot.set_posture("balance_stand")
-    await asyncio.sleep(2.0)
-    await robot.set_posture("free_walk")
-    await asyncio.sleep(2.0)
-    await robot.enable_omni_teleop()
-    await asyncio.sleep(1.0)
-    await robot.get_state()
+    from robot_brain.actuation.unitree import prepare_locomotion
+
+    await prepare_locomotion(robot)
     raw = robot.action_history[-1].get("raw", {})
     mode = raw.get("sport_mode")
     label = _SPORT_MODE_LABELS.get(mode, "?") if mode is not None else "?"

@@ -1,0 +1,12 @@
+{
+  "artifacts": [
+    {
+      "path": "/Users/dijia/project/robot-brain/docs/evidence/field-acceptance-2026-08-05/read-only.json",
+      "sha256": "841cae8bdef2951862fd0d56f4f038598edff3522ede16642fbf246c5c55a9ef"
+    }
+  ],
+  "failures": [],
+  "gate_id": "go2_read_only_sensor_report",
+  "ok": true,
+  "schema_version": 1
+}
